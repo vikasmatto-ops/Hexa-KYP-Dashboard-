@@ -96,7 +96,7 @@ const PAGE3 = (() => {
       const m=L.circleMarker([jLat,jLng],{radius:7,fillColor:color,color:'#fff',weight:1.5,opacity:1,fillOpacity:.85});
       m.bindTooltip(h.hospitalName,{direction:'top',offset:[0,-5]});
       // Click dot → open full hospital detail modal (same as Hospital Network table)
-      m.on('click',()=>{if(window.PAGE1&&PAGE1.openPanel)PAGE1.openPanel(h.hospitalName);});
+      m.on('click',(e)=>{e.originalEvent?.stopPropagation();setTimeout(()=>{if(window.PAGE1&&PAGE1.openPanel)PAGE1.openPanel(h.hospitalName);},50);});
       m.addTo(map);markers.push(m);plotted++;
       if(h.activeStatus==='Active'&&(f.insurer||f.tpa)){
         const iE=f.insurer?h.insurer[f.insurer]===true:true;
