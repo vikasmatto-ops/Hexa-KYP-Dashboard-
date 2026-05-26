@@ -202,8 +202,10 @@ const PAGE1 = (() => {
       const h=hospLookup[r.hospitalName.toLowerCase().trim()];
       if(!h||h.activeStatus!=='Active')return false;
       // OPTION A: must be currently empanelled with selected insurer/TPA
-      if(insurer && h.insurer[insurer]!==true)return false;
-      if(tpa && h.tpa[tpa]!==true)return false;
+      if(insurer && h.insurer[insurer]!==true && h.insurerRaw && h.insurerRaw[insurer]!=='No')return false;
+      if(insurer && h.insurerRaw && h.insurerRaw[insurer]==='No')return false;
+      if(tpa && h.tpa[tpa]!==true && h.tpaRaw && h.tpaRaw[tpa]!=='No')return false;
+      if(tpa && h.tpaRaw && h.tpaRaw[tpa]==='No')return false;
       return true;
     }).slice(0,8);
     if(!recs.length){
