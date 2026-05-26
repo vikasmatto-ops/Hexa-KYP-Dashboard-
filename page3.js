@@ -95,8 +95,8 @@ const PAGE3 = (() => {
       const jLat=coords.lat+(Math.random()-.5)*.003,jLng=coords.lng+(Math.random()-.5)*.003;
       const m=L.circleMarker([jLat,jLng],{radius:7,fillColor:color,color:'#fff',weight:1.5,opacity:1,fillOpacity:.85});
       m.bindTooltip(h.hospitalName,{direction:'top',offset:[0,-5]});
-      // Click dot → open full hospital detail modal (same as Hospital Network table)
-      m.on('click',()=>{if(window.PAGE1&&PAGE1.openPanel)PAGE1.openPanel(h.hospitalName);});
+      m.bindPopup(buildRichPopup(h),{maxWidth:340,minWidth:280,className:'map-rich-popup'});
+      m.on('click',function(){this.openPopup();});
       m.addTo(map);markers.push(m);plotted++;
       if(h.activeStatus==='Active'&&(f.insurer||f.tpa)){
         const iE=f.insurer?h.insurer[f.insurer]===true:true;
@@ -124,6 +124,51 @@ const PAGE3 = (() => {
     const active=hosps.filter(h=>h.activeStatus==='Active').length;
     const el1=document.getElementById('p3-active-count'),el2=document.getElementById('p3-inactive-count'),el3=document.getElementById('p3-total-count');
     if(el1)el1.textContent=active;if(el2)el2.textContent=hosps.length-active;if(el3)el3.textContent=hosps.length;
+  }
+
+  function buildRichPopup(h){
+    const covMax=DATA.insurerNames.length+DATA.tpaNames.length||1;
+    const yesIns=DATA.insurerNames.filter(i=>h.insurer[i]===true);
+    const yesTpa=DATA.tpaNames.filter(t=>h.tpa[t]===true);
+    const cov=Math.round(((yesIns.length+yesTpa.length)/covMax)*100);
+    const hc=h.aspData||[];
+    const valid=hc.filter(c=>c.approvalAmount!==null);
+    const avg=valid.length?Math.round(valid.reduce((s,c)=>s+c.approvalAmount,0)/valid.length):null;
+    const dates=hc.map(c=>c.dodParsed).filter(Boolean);
+    const lastCase=dates.length?new Date(Math.max(...dates.map(d=>d.getTime()))):null;
+    const fmtN=n=>{if(!n&&n!==0)return'—';if(n>=100000)return(n/100000).toFixed(1)+'L';if(n>=1000)return Math.round(n).toLocaleString('en-IN');return Math.round(n).toString();};
+    // Top insurers/TPAs by case count
+    const byIns={};
+    hc.forEach(c=>{if(!c.insuranceName)return;if(!byIns[c.insuranceName])byIns[c.insuranceName]={count:0};byIns[c.insuranceName].count++;});
+    const topIns=Object.entries(byIns).sort(([,a],[,b])=>b.count-a.count).slice(0,5);
+    return`<div style="font-family:'DM Sans',sans-serif;max-width:320px;font-size:12px;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:4px;color:#0f172a;">${esc(h.hospitalName)}</div>
+      <div style="font-size:11px;color:#64748b;margin-bottom:8px;">${esc(h.area||'—')}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+        <span style="background:${h.activeStatus==='Active'?'#d1fae5':'#fee2e2'};color:${h.activeStatus==='Active'?'#065f46':'#991b1b'};font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;">${esc(h.activeStatus||'—')}</span>
+        <span style="background:#dbeafe;color:#1e40af;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;">${esc(h.zone||'—')}</span>
+        ${h.mopStatus?`<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;">${esc(h.mopStatus)}</span>`:''}
+        ${h.tier?`<span style="background:#fce7f3;color:#9f1239;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;">${esc(h.tier)}</span>`:''}
+      </div>
+      <div style="background:#f8fafc;border-radius:6px;padding:8px 10px;margin-bottom:8px;">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:11px;">
+          <div><div style="color:#94a3b8;font-size:9px;text-transform:uppercase;font-weight:600;">Cov</div><div style="font-weight:700;color:#0ea5e9;">${cov}%</div></div>
+          <div><div style="color:#94a3b8;font-size:9px;text-transform:uppercase;font-weight:600;">Cases</div><div style="font-weight:700;">${hc.length}</div></div>
+          <div><div style="color:#94a3b8;font-size:9px;text-transform:uppercase;font-weight:600;">Avg ASP</div><div style="font-weight:700;color:#10b981;">${avg?'₹'+fmtN(avg):'—'}</div></div>
+        </div>
+      </div>
+      ${lastCase?`<div style="font-size:11px;color:#64748b;margin-bottom:8px;">📅 Last case: <strong style="color:#334155;">${lastCase.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</strong></div>`:''}
+      <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.4px;margin:8px 0 4px;">✓ Empanelled (${yesIns.length+yesTpa.length})</div>
+      <div style="max-height:120px;overflow-y:auto;font-size:11px;line-height:1.5;color:#475569;">
+        ${yesIns.length?`<strong>Insurers:</strong> ${yesIns.map(i=>esc(i.length>28?i.slice(0,26)+'…':i)).join(', ')}<br>`:''}
+        ${yesTpa.length?`<strong>TPAs:</strong> ${yesTpa.map(t=>esc(t.length>28?t.slice(0,26)+'…':t)).join(', ')}`:''}
+        ${!yesIns.length&&!yesTpa.length?'<span style="color:#94a3b8;">None</span>':''}
+      </div>
+      ${topIns.length?`<div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.4px;margin:8px 0 4px;">Top 5 Insurers (by cases)</div><div style="font-size:11px;line-height:1.6;color:#475569;">${topIns.map(([n,d])=>`${esc(n.length>26?n.slice(0,24)+'…':n)} <span style="color:#94a3b8;">(${d.count})</span>`).join('<br>')}</div>`:''}
+      ${h.insComments?`<div style="margin-top:8px;padding:6px 8px;background:#fef3c7;border-radius:4px;font-size:11px;color:#92400e;"><strong>Insurance:</strong> ${esc(h.insComments)}</div>`:''}
+      ${h.cityComments?`<div style="margin-top:4px;padding:6px 8px;background:#dbeafe;border-radius:4px;font-size:11px;color:#1e40af;"><strong>City:</strong> ${esc(h.cityComments)}</div>`:''}
+      ${h.doctorComments?`<div style="margin-top:4px;padding:6px 8px;background:#d1fae5;border-radius:4px;font-size:11px;color:#065f46;"><strong>Doctors:</strong> ${esc(h.doctorComments)}</div>`:''}
+    </div>`;
   }
 
   function buildPopup(h){
