@@ -413,41 +413,54 @@ const PAGE2 = (() => {
 
 
   function downloadTopHospitalsCSV(){
-    // Get filtered cases matching current th filters
+    // Apply same filters as renderTopHospitals
     let cases=DATA.aspCases;
-    if(th.city)    cases=cases.filter(c=>c.city===th.city);
-    if(th.category)cases=cases.filter(c=>c.category.toLowerCase()===th.category.toLowerCase());
+    if(th.city)     cases=cases.filter(c=>c.city===th.city);
+    if(th.category) cases=cases.filter(c=>c.category.toLowerCase()===th.category.toLowerCase());
     if(th.procedure)cases=cases.filter(c=>c.procedureGroup===th.procedure);
-    if(th.insurer) cases=cases.filter(c=>c.insuranceName===th.insurer);
-    if(th.tpa)     cases=cases.filter(c=>c.tpaName===th.tpa);
-    if(th.year)    cases=cases.filter(c=>c.doaParsed&&c.doaParsed.getFullYear()===parseInt(th.year));
-    if(th.month)   cases=cases.filter(c=>c.doaParsed&&String(c.doaParsed.getMonth()+1).padStart(2,'0')===th.month);
+    if(th.insurer)  cases=cases.filter(c=>c.insuranceName===th.insurer);
+    if(th.tpa)      cases=cases.filter(c=>c.tpaName===th.tpa);
+    if(th.year)     cases=cases.filter(c=>c.doaParsed&&c.doaParsed.getFullYear()===parseInt(th.year));
+    if(th.month)    cases=cases.filter(c=>c.doaParsed&&String(c.doaParsed.getMonth()+1).padStart(2,'0')===th.month);
 
-    // Get top N hospital names from current results
-    const topN=parseInt(th.top)||10;
+    // Build ranked hospital list (same logic as renderTopHospitals)
     const byHosp={};
-    cases.forEach(c=>{if(!c.approvalAmount)return;if(!byHosp[c.hospitalName])byHosp[c.hospitalName]={asp:[],count:0};byHosp[c.hospitalName].asp.push(c.approvalAmount);byHosp[c.hospitalName].count++;});
-    const rows=Object.values(byHosp).map(d=>({...d,avgAsp:Math.round(d.asp.reduce((s,v)=>s+v,0)/d.asp.length)}));
-    rows.sort((a,b)=>th.mode==='asp'?b.avgAsp-a.avgAsp:b.count-a.count);
-    const topHospNames=new Set(rows.slice(0,topN).map((r,i)=>Object.keys(byHosp)[Object.values(byHosp).indexOf(r)]));
+    cases.forEach(c=>{
+      if(!c.approvalAmount)return;
+      if(!byHosp[c.hospitalName])byHosp[c.hospitalName]={asp:[],count:0};
+      byHosp[c.hospitalName].asp.push(c.approvalAmount);
+      byHosp[c.hospitalName].count++;
+    });
+    const ranked=Object.entries(byHosp)
+      .map(([name,d])=>({name,avgAsp:Math.round(d.asp.reduce((s,v)=>s+v,0)/d.asp.length),count:d.count}))
+      .sort((a,b)=>th.mode==='asp'?b.avgAsp-a.avgAsp:b.count-a.count);
 
-    // Filter cases to only top N hospitals
-    const exportCases=cases.filter(c=>topHospNames.has(c.hospitalName));
+    // Top N or all hospitals
+    const topN=th.top==='all'?ranked.length:parseInt(th.top)||10;
+    const topNames=new Set(ranked.slice(0,topN).map(r=>r.name));
 
-    // Build CSV
+    // Export ALL cases for those hospitals (not just ones with approval amount)
+    const exportCases=cases.filter(c=>topNames.has(c.hospitalName));
+
+    if(!exportCases.length){alert('No data to download for current filters.');return;}
+
     const headers=['IPD ID','Lead ID','Patient Name','DOD','Insurance Name','TPA Name','City Bucket','Category','Procedure','Bill Amount','Approval Amount','Waive Off?','Waive Off Amount'];
     const csvRows=exportCases.map(c=>[
-      c.ipdId,c.leadId,c.patientName,c.dodRaw,c.insuranceName,c.tpaName,c.cityBucket,c.category,c.procedureRaw,
-      c.billAmount||'',c.approvalAmount||'',c.waiveOff||'',c.waiveOffAmount||''
-    ].map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
+      c.ipdId,c.leadId,c.patientName,c.dodRaw,
+      c.insuranceName,c.tpaName,c.cityBucket,
+      c.category,c.procedureRaw,
+      c.billAmount!==null?c.billAmount:'',
+      c.approvalAmount!==null?c.approvalAmount:'',
+      c.waiveOff||'',
+      c.waiveOffAmount!==null?c.waiveOffAmount:''
+    ].map(v=>`"${String(v===null||v===undefined?'':v).replace(/"/g,'""')}"`).join(','));
 
     const csv=[headers.map(h=>`"${h}"`).join(','),...csvRows].join('\n');
     const a=document.createElement('a');
     a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
-    const ts=new Date().toISOString().slice(0,10);
-    a.download=`top_hospitals_${ts}.csv`;
+    a.download=`top_hospitals_${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
-    console.log(`[Hexa] Downloaded ${exportCases.length} cases for top ${topN} hospitals`);
+    console.log('[Hexa] Downloaded',exportCases.length,'cases for',topNames.size,'hospitals');
   }
 
   function bindEvents(){
