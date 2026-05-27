@@ -411,6 +411,45 @@ const PAGE2 = (() => {
     fillSel('p2-hospital',[['','All Hospitals'],...[...new Set(DATA.aspCases.map(c=>c.hospitalName))].sort().map(h=>[h,h])],f.hospital);
   }
 
+
+  function downloadTopHospitalsCSV(){
+    // Get filtered cases matching current th filters
+    let cases=DATA.aspCases;
+    if(th.city)    cases=cases.filter(c=>c.city===th.city);
+    if(th.category)cases=cases.filter(c=>c.category.toLowerCase()===th.category.toLowerCase());
+    if(th.procedure)cases=cases.filter(c=>c.procedureGroup===th.procedure);
+    if(th.insurer) cases=cases.filter(c=>c.insuranceName===th.insurer);
+    if(th.tpa)     cases=cases.filter(c=>c.tpaName===th.tpa);
+    if(th.year)    cases=cases.filter(c=>c.doaParsed&&c.doaParsed.getFullYear()===parseInt(th.year));
+    if(th.month)   cases=cases.filter(c=>c.doaParsed&&String(c.doaParsed.getMonth()+1).padStart(2,'0')===th.month);
+
+    // Get top N hospital names from current results
+    const topN=parseInt(th.top)||10;
+    const byHosp={};
+    cases.forEach(c=>{if(!c.approvalAmount)return;if(!byHosp[c.hospitalName])byHosp[c.hospitalName]={asp:[],count:0};byHosp[c.hospitalName].asp.push(c.approvalAmount);byHosp[c.hospitalName].count++;});
+    const rows=Object.values(byHosp).map(d=>({...d,avgAsp:Math.round(d.asp.reduce((s,v)=>s+v,0)/d.asp.length)}));
+    rows.sort((a,b)=>th.mode==='asp'?b.avgAsp-a.avgAsp:b.count-a.count);
+    const topHospNames=new Set(rows.slice(0,topN).map((r,i)=>Object.keys(byHosp)[Object.values(byHosp).indexOf(r)]));
+
+    // Filter cases to only top N hospitals
+    const exportCases=cases.filter(c=>topHospNames.has(c.hospitalName));
+
+    // Build CSV
+    const headers=['IPD ID','Lead ID','Patient Name','DOD','Insurance Name','TPA Name','City Bucket','Category','Procedure','Bill Amount','Approval Amount','Waive Off?','Waive Off Amount'];
+    const csvRows=exportCases.map(c=>[
+      c.ipdId,c.leadId,c.patientName,c.dodRaw,c.insuranceName,c.tpaName,c.cityBucket,c.category,c.procedureRaw,
+      c.billAmount||'',c.approvalAmount||'',c.waiveOff||'',c.waiveOffAmount||''
+    ].map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(','));
+
+    const csv=[headers.map(h=>`"${h}"`).join(','),...csvRows].join('\n');
+    const a=document.createElement('a');
+    a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
+    const ts=new Date().toISOString().slice(0,10);
+    a.download=`top_hospitals_${ts}.csv`;
+    a.click();
+    console.log(`[Hexa] Downloaded ${exportCases.length} cases for top ${topN} hospitals`);
+  }
+
   function bindEvents(){
     ['year','quarter','month','city','category','insurer','tpa','hospital','status'].forEach(k=>{
       document.getElementById('p2-'+k)?.addEventListener('change',e=>{f[k]=e.target.value;renderAll();});
@@ -422,6 +461,7 @@ const PAGE2 = (() => {
       const key=id.replace('th-','');document.getElementById(id)?.addEventListener('change',e=>{th[key]=e.target.value;renderTopHospitals();});
     });
     on('th-reset',()=>{Object.keys(th).forEach(k=>{if(k!=='mode'&&k!=='top')th[k]='';});populateComparators();renderTopHospitals();});
+    on('th-download','click',downloadTopHospitalsCSV);
     document.getElementById('th-category')?.addEventListener('change',e=>{
       th.category=e.target.value;
       fillSel('th-procedure',[['','All Procedures'],...getProceduresForCategory(th.category).map(p=>[p,p])],'');
