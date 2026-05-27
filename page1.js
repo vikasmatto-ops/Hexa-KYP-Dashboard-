@@ -195,21 +195,16 @@ const PAGE1 = (() => {
     if(!city&&!insurer&&!tpa&&!category&&!procedure){el.innerHTML='<div style="color:var(--text3);font-size:13px;">Select at least one filter.</div>';return;}
     // STRICT filtering — no relaxation + Active hospitals + current empanelment check
     let recs=getRecommendations({city,insurer,tpa,category,procedure,topN:100});
-    console.log('[Debug] getRecommendations returned:',recs.length,'hospitals for insurer:',insurer,'city:',city);
-    if(recs.length>0)console.log('[Debug] First result:',recs[0].hospitalName,'cases:',recs[0].caseCount);
-    // Build hospital lookup for status + empanelment
+    // Build hospital lookup — exclude only explicitly depaneled (No) hospitals
     const hospLookup={};
     DATA.hospitals.forEach(h=>{hospLookup[h.hospitalName.toLowerCase().trim()]=h;});
-    const recsBeforeFilter=recs.length;
     recs=recs.filter(r=>{
       const h=hospLookup[r.hospitalName.toLowerCase().trim()];
-      if(!h){console.log('[Debug] No hospital match for:',r.hospitalName);return false;}
-      if(h.activeStatus!=='Active'){console.log('[Debug] Inactive:',r.hospitalName);return false;}
-      if(insurer && h.insurerRaw && h.insurerRaw[insurer]==='No'){console.log('[Debug] Explicitly No:',r.hospitalName);return false;}
+      if(!h||h.activeStatus!=='Active')return false;
+      if(insurer && h.insurerRaw && h.insurerRaw[insurer]==='No')return false;
       if(tpa && h.tpaRaw && h.tpaRaw[tpa]==='No')return false;
       return true;
     }).slice(0,8);
-    console.log('[Debug] After filter:',recs.length,'(was',recsBeforeFilter,')');
     if(!recs.length){
       const filterDesc=[city?cityLabel(city):'',insurer||'',tpa||'',category||'',procedure||''].filter(Boolean).join(' · ');
       el.innerHTML=`<div style="background:var(--amber-lt);border-left:4px solid var(--amber);border-radius:6px;padding:14px 16px;font-size:13px;color:#92400e;">
