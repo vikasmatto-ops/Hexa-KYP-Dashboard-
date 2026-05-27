@@ -1,6 +1,6 @@
 const PAGE2 = (() => {
   const f={year:'',quarter:'',month:'',city:'',category:'',insurer:'',tpa:'',hospital:'',status:''};
-  const th={city:'',category:'',insurer:'',tpa:'',year:'',month:'',top:'10',mode:'volume'};
+  const th={city:'',category:'',insurer:'',tpa:'',procedure:'',year:'',month:'',top:'10',mode:'volume'};
   let charts={},trendMode='monthly';
 
   // Tier accordion open state
@@ -171,6 +171,7 @@ const PAGE2 = (() => {
     let cases=DATA.aspCases;
     if(th.city)    cases=cases.filter(c=>c.city===th.city);
     if(th.category)cases=cases.filter(c=>c.category.toLowerCase()===th.category.toLowerCase());
+    if(th.procedure)cases=cases.filter(c=>c.procedureGroup===th.procedure);
     if(th.insurer) cases=cases.filter(c=>c.insuranceName===th.insurer);
     if(th.tpa)     cases=cases.filter(c=>c.tpaName===th.tpa);
     if(th.year)    cases=cases.filter(c=>c.doaParsed&&c.doaParsed.getFullYear()===parseInt(th.year));
@@ -323,7 +324,8 @@ const PAGE2 = (() => {
     const thYrs=[['','All Years'],...[...new Set(DATA.aspCases.map(c=>c.doaParsed&&c.doaParsed.getFullYear()).filter(Boolean))].sort().map(y=>[y,String(y)])];
     const thMos=[['','All Months'],['01','Jan'],['02','Feb'],['03','Mar'],['04','Apr'],['05','May'],['06','Jun'],['07','Jul'],['08','Aug'],['09','Sep'],['10','Oct'],['11','Nov'],['12','Dec']];
     fillSel('th-year',thYrs,'');fillSel('th-month',thMos,'');
-    fillSel('th-city',cities,'');fillSel('th-category',cats,'');fillSel('th-insurer',insurers,'');fillSel('th-tpa',tpas,'');
+    fillSel('th-city',cities,'');fillSel('th-category',cats,'');
+    fillSel('th-procedure',[['','All Procedures'],...(th.category?getProceduresForCategory(th.category):Object.values(CONFIG.PROCEDURE_GROUPS||{}).filter((v,i,a)=>a.indexOf(v)===i).sort()).map(p=>[p,p])],'');fillSel('th-insurer',insurers,'');fillSel('th-tpa',tpas,'');
   }
 
   function runComparison(){
@@ -386,10 +388,16 @@ const PAGE2 = (() => {
     on('p2-clear',()=>{Object.keys(f).forEach(k=>f[k]='');renderFilters();renderAll();});
     on('comp-go',runComparison);
     on('comp-cat','change',()=>{const cat=document.getElementById('comp-cat')?.value;fillSel('comp-proc',[['','All Procedures'],...getProceduresForCategory(cat).map(p=>[p,p])],'');});
-    ['th-city','th-category','th-insurer','th-tpa','th-year','th-month','th-top'].forEach(id=>{
+    ['th-city','th-category','th-procedure','th-insurer','th-tpa','th-year','th-month','th-top'].forEach(id=>{
       const key=id.replace('th-','');document.getElementById(id)?.addEventListener('change',e=>{th[key]=e.target.value;renderTopHospitals();});
     });
     on('th-reset',()=>{Object.keys(th).forEach(k=>{if(k!=='mode'&&k!=='top')th[k]='';});populateComparators();renderTopHospitals();});
+    document.getElementById('th-category')?.addEventListener('change',e=>{
+      th.category=e.target.value;
+      fillSel('th-procedure',[['','All Procedures'],...getProceduresForCategory(th.category).map(p=>[p,p])],'');
+      th.procedure='';
+      renderTopHospitals();
+    });
   }
 
   function on(id,evOrFn,fn){

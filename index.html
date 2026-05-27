@@ -6,7 +6,7 @@
 <title>HexaHealth Hospital Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20">
+<link rel="stylesheet" href="styles.css?v=23">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 </head>
 <body>
@@ -194,6 +194,7 @@
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px;">
       <div class="filter-group"><div class="filter-label">City</div><select id="th-city"></select></div>
       <div class="filter-group"><div class="filter-label">Category</div><select id="th-category"></select></div>
+      <div class="filter-group"><div class="filter-label">Procedure</div><select id="th-procedure" style="min-width:175px;"></select></div>
       <div class="filter-group"><div class="filter-label">Insurer</div><select id="th-insurer" style="min-width:160px;"></select></div>
       <div class="filter-group"><div class="filter-label">TPA</div><select id="th-tpa" style="min-width:150px;"></select></div>
       <div class="filter-group"><div class="filter-label">Year</div><select id="th-year"></select></div>
@@ -295,12 +296,12 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="pincodes.js?v=20"></script>
-<script src="config.js?v=20"></script>
-<script src="data.js?v=20"></script>
-<script src="page1.js?v=20"></script>
-<script src="page2.js?v=20"></script>
-<script src="page3.js?v=20"></script>
+<script src="pincodes.js?v=23"></script>
+<script src="config.js?v=23"></script>
+<script src="data.js?v=23"></script>
+<script src="page1.js?v=23"></script>
+<script src="page2.js?v=23"></script>
+<script src="page3.js?v=23"></script>
 <script>
 window.closeModal=function(){document.getElementById('detail-overlay').classList.remove('open');document.querySelectorAll('.hospital-row.selected').forEach(r=>r.classList.remove('selected'));};
 function showPage(id){
