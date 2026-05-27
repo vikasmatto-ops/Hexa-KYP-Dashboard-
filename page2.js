@@ -52,18 +52,48 @@ const PAGE2 = (() => {
   function renderTopRec(cases){
     const el=document.getElementById('p2-top-rec');if(!el)return;
     const valid=cases.filter(c=>c.approvalAmount!==null);
-    if(!valid.length){el.innerHTML=`<div style="color:var(--text3);font-size:13px;padding:20px;">No data for current filters.</div>`;return;}
+    if(!valid.length){
+      el.innerHTML=`<div style="color:var(--text3);font-size:13px;padding:20px;">No data for current filters.</div>`;
+      return;
+    }
+
+    // Stat 1: Highest ASP hospital (min 5 cases)
     const byHosp={};
-    valid.forEach(c=>{if(!byHosp[c.hospitalName])byHosp[c.hospitalName]={cases:[],city:c.city,cat:c.category,ins:c.insuranceName};byHosp[c.hospitalName].cases.push(c.approvalAmount);});
-    const best=Object.entries(byHosp).map(([name,d])=>({name,avg:Math.round(d.cases.reduce((s,v)=>s+v,0)/d.cases.length),count:d.cases.length,city:d.city,cat:d.cat,ins:d.ins})).sort((a,b)=>b.avg-a.avg)[0];
-    const hNet=DATA.hospitals.find(h=>h.hospitalName.toLowerCase().trim()===best.name.toLowerCase().trim());
-    el.innerHTML=`<div style="background:linear-gradient(135deg,#0284c7,#0ea5e9);border-radius:var(--r);padding:20px;color:#fff;min-height:200px;">
-      <div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;opacity:.75;margin-bottom:4px;">⭐ TOP RECOMMENDED HOSPITAL</div>
-      <div style="background:rgba(255,255,255,.15);display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;margin-bottom:10px;">${best.count} cases</div>
-      <div style="font-size:20px;font-weight:800;margin-bottom:4px;letter-spacing:-.3px;">${esc(best.name.split(',')[0])}</div>
-      <div style="font-size:11px;opacity:.8;margin-bottom:12px;">${cityLabel(best.city)}${best.cat?' • '+esc(best.cat):''}${best.ins?' • '+esc(best.ins):''}</div>
-      <div style="font-size:30px;font-weight:800;letter-spacing:-1px;margin-bottom:8px;">₹${fmtN(best.avg)}</div>
-      ${hNet?`<div style="display:flex;align-items:center;gap:6px;font-size:12px;"><span style="width:7px;height:7px;border-radius:50%;background:${hNet.activeStatus==='Active'?'#6ee7b7':'#fca5a5'};display:inline-block;"></span>${hNet.activeStatus}</div>`:''}
+    valid.forEach(c=>{
+      if(!byHosp[c.hospitalName])byHosp[c.hospitalName]={asp:[],city:c.city,count:0};
+      byHosp[c.hospitalName].asp.push(c.approvalAmount);
+      byHosp[c.hospitalName].count++;
+    });
+    const hospList=Object.entries(byHosp).map(([name,d])=>({name,avg:Math.round(d.asp.reduce((s,v)=>s+v,0)/d.asp.length),count:d.count,city:d.city}));
+    const highASP=hospList.filter(h=>h.count>=5).sort((a,b)=>b.avg-a.avg)[0];
+
+    // Stat 2: Most active hospital (most cases)
+    const mostActive=hospList.sort((a,b)=>b.count-a.count)[0];
+
+    // Stat 3: Best performing city
+    const byCity={};
+    valid.forEach(c=>{if(!byCity[c.city])byCity[c.city]=[];byCity[c.city].push(c.approvalAmount);});
+    const bestCity=Object.entries(byCity).map(([city,vals])=>({city,avg:Math.round(vals.reduce((s,v)=>s+v,0)/vals.length),count:vals.length})).sort((a,b)=>b.avg-a.avg)[0];
+
+    // Stat 4: Most used insurer
+    const byIns={};
+    cases.forEach(c=>{if(c.insuranceName)byIns[c.insuranceName]=(byIns[c.insuranceName]||0)+1;});
+    const topIns=Object.entries(byIns).sort(([,a],[,b])=>b-a)[0];
+
+    const stats=[
+      {icon:'🏆',label:'Highest ASP Hospital',value:highASP?'₹'+fmtN(highASP.avg):'—',sub:highASP?esc(highASP.name.split(',')[0].slice(0,28)):'Min 5 cases needed',color:'#0284c7',bg:'linear-gradient(135deg,#0284c7,#0ea5e9)'},
+      {icon:'🏥',label:'Most Active Hospital',value:mostActive?mostActive.count+' cases':'—',sub:mostActive?esc(mostActive.name.split(',')[0].slice(0,28)):'—',color:'#059669',bg:'linear-gradient(135deg,#059669,#10b981)'},
+      {icon:'🌆',label:'Best Performing City',value:bestCity?'₹'+fmtN(bestCity.avg):'—',sub:bestCity?cityLabel(bestCity.city)+' ('+bestCity.count+' cases)':'—',color:'#7c3aed',bg:'linear-gradient(135deg,#7c3aed,#a78bfa)'},
+      {icon:'🛡️',label:'Most Used Insurer',value:topIns?topIns[1]+' cases':'—',sub:topIns?esc(topIns[0].slice(0,28)):'—',color:'#d97706',bg:'linear-gradient(135deg,#d97706,#f59e0b)'},
+    ];
+
+    el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px;">
+      ${stats.map(s=>`<div style="background:${s.bg};border-radius:10px;padding:14px;color:#fff;">
+        <div style="font-size:18px;margin-bottom:4px;">${s.icon}</div>
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;opacity:.8;margin-bottom:4px;">${s.label}</div>
+        <div style="font-size:20px;font-weight:800;letter-spacing:-.5px;margin-bottom:3px;">${s.value}</div>
+        <div style="font-size:11px;opacity:.85;">${s.sub}</div>
+      </div>`).join('')}
     </div>`;
   }
 
