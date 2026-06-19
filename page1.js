@@ -195,13 +195,16 @@ const PAGE1 = (() => {
     if(!city&&!insurer&&!tpa&&!category&&!procedure){el.innerHTML='<div style="color:var(--text3);font-size:13px;">Select at least one filter.</div>';return;}
     // STRICT filtering — no relaxation + Active hospitals + current empanelment check
     let recs=getRecommendations({city,insurer,tpa,category,procedure,topN:100});
-    // Build hospital lookup — exclude only explicitly depaneled (No) hospitals
+    // Build hospital lookup for status + empanelment
     const hospLookup={};
     DATA.hospitals.forEach(h=>{hospLookup[h.hospitalName.toLowerCase().trim()]=h;});
     recs=recs.filter(r=>{
       const h=hospLookup[r.hospitalName.toLowerCase().trim()];
       if(!h||h.activeStatus!=='Active')return false;
+      // OPTION A: must be currently empanelled with selected insurer/TPA
+      if(insurer && h.insurer[insurer]!==true && h.insurerRaw && h.insurerRaw[insurer]!=='No')return false;
       if(insurer && h.insurerRaw && h.insurerRaw[insurer]==='No')return false;
+      if(tpa && h.tpa[tpa]!==true && h.tpaRaw && h.tpaRaw[tpa]!=='No')return false;
       if(tpa && h.tpaRaw && h.tpaRaw[tpa]==='No')return false;
       return true;
     }).slice(0,8);

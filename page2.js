@@ -1,12 +1,12 @@
 const PAGE2 = (() => {
   const f={year:'',quarter:'',month:'',city:'',category:'',insurer:'',tpa:'',hospital:'',status:''};
-  const th={city:'',category:'',insurer:'',tpa:'',procedure:'',year:'',month:'',top:'10',mode:'volume'};
+  const th={city:'',category:'',insurer:'',tpa:'',year:'',month:'',top:'10',mode:'volume'};
   let charts={},trendMode='monthly';
 
   // Tier accordion open state
   const accOpen={Gold:false,Silver:false,Bronze:false,Underutilized:false};
 
-  function init(){renderFilters();renderAll();bindEvents();onDataRefresh(()=>{renderFilters();renderAll();});}
+  function init(){renderFilters();initCCFilters();renderAll();bindEvents();bindCCEvents();onDataRefresh(()=>{renderFilters();initCCFilters();renderAll();});}
 
   function getFiltered(){
     let cases=DATA.aspCases;
@@ -30,7 +30,7 @@ const PAGE2 = (() => {
   function renderAll(){
     const cases=getFiltered();
     renderMetrics(cases);
-    renderTopRec(cases);
+    renderCityCategoryChart();
     renderTrend(cases);
     renderTiers(cases);  // reactive to city filter
     renderTopHospitals();
@@ -49,55 +49,101 @@ const PAGE2 = (() => {
     setText('m-cities',new Set(DATA.aspCases.map(c=>c.city).filter(Boolean)).size);
   }
 
-  function renderTopRec(cases){
-    const el=document.getElementById('p2-top-rec');if(!el)return;
-    const valid=cases.filter(c=>c.approvalAmount!==null);
-    if(!valid.length){
-      el.innerHTML=`<div style="color:var(--text3);font-size:13px;padding:20px;">No data for current filters.</div>`;
+  // City-wise Category Comparison — own filters, sequential period comparison
+  const cc={year:'',quarter:'',month:'',category:''};
+
+  function initCCFilters(){
+    const yrs=[['','All Years'],...[...new Set(DATA.aspCases.map(c=>c.doaParsed&&c.doaParsed.getFullYear()).filter(Boolean))].sort().reverse().map(y=>[y,String(y)])];
+    const mos=[['','All Months'],['01','Jan'],['02','Feb'],['03','Mar'],['04','Apr'],['05','May'],['06','Jun'],['07','Jul'],['08','Aug'],['09','Sep'],['10','Oct'],['11','Nov'],['12','Dec']];
+    const cats=[['','All Categories'],...CONFIG.ACTIVE_CATEGORIES.map(c=>[c,c])];
+    fillSel('cc-year',yrs,'');fillSel('cc-month',mos,'');fillSel('cc-category',cats,'');
+  }
+
+  function bindCCEvents(){
+    ['cc-year','cc-quarter','cc-month','cc-category'].forEach(id=>{
+      document.getElementById(id)?.addEventListener('change',e=>{cc[id.replace('cc-','')]=e.target.value;renderCityCategoryChart();});
+    });
+  }
+
+  function getCCPeriods(){
+    const cases=DATA.aspCases.filter(c=>c.approvalAmount!==null&&c.doaParsed);
+    let curFilter,prevFilter,curLabel,prevLabel;
+
+    if(cc.month&&cc.year){
+      const y=parseInt(cc.year),m=parseInt(cc.month);
+      curFilter=c=>{const d=c.doaParsed;return d.getFullYear()===y&&(d.getMonth()+1)===m;};
+      const pm=m===1?12:m-1,py=m===1?y-1:y;
+      prevFilter=c=>{const d=c.doaParsed;return d.getFullYear()===py&&(d.getMonth()+1)===pm;};
+      const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      curLabel=mn[m-1]+' '+y;prevLabel=mn[pm-1]+' '+py;
+    } else if(cc.quarter&&cc.year){
+      const y=parseInt(cc.year),q=parseInt(cc.quarter);
+      curFilter=c=>{const d=c.doaParsed;return d.getFullYear()===y&&Math.ceil((d.getMonth()+1)/3)===q;};
+      const pq=q===1?4:q-1,py=q===1?y-1:y;
+      prevFilter=c=>{const d=c.doaParsed;return d.getFullYear()===py&&Math.ceil((d.getMonth()+1)/3)===pq;};
+      curLabel='Q'+q+' '+y;prevLabel='Q'+pq+' '+py;
+    } else if(cc.year){
+      const y=parseInt(cc.year);
+      curFilter=c=>c.doaParsed.getFullYear()===y;
+      prevFilter=c=>c.doaParsed.getFullYear()===y-1;
+      curLabel=String(y);prevLabel=String(y-1);
+    } else {
+      // Auto-detect latest month
+      let maxD=null;
+      cases.forEach(c=>{if(!maxD||c.doaParsed>maxD)maxD=c.doaParsed;});
+      if(!maxD)return{curCases:[],prevCases:[],curLabel:'—',prevLabel:'—'};
+      const y=maxD.getFullYear(),m=maxD.getMonth()+1;
+      curFilter=c=>{const d=c.doaParsed;return d.getFullYear()===y&&(d.getMonth()+1)===m;};
+      const pm=m===1?12:m-1,py=m===1?y-1:y;
+      prevFilter=c=>{const d=c.doaParsed;return d.getFullYear()===py&&(d.getMonth()+1)===pm;};
+      const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      curLabel=mn[m-1]+' '+y;prevLabel=mn[pm-1]+' '+py;
+    }
+
+    let cur=cases.filter(curFilter),prev=cases.filter(prevFilter);
+    if(cc.category){cur=cur.filter(c=>c.category.toLowerCase()===cc.category.toLowerCase());prev=prev.filter(c=>c.category.toLowerCase()===cc.category.toLowerCase());}
+    return{curCases:cur,prevCases:prev,curLabel,prevLabel};
+  }
+
+  function renderCityCategoryChart(){
+    destroyChart('cityCat');
+    const ctx=document.getElementById('chart-city-cat');if(!ctx)return;
+    const{curCases,prevCases,curLabel,prevLabel}=getCCPeriods();
+
+    // Period label
+    const plEl=document.getElementById('cc-period-label');
+    if(plEl)plEl.textContent=curCases.length?curLabel+' vs '+prevLabel:'No data for selected period';
+
+    if(!curCases.length&&!prevCases.length){
+      const legEl=document.getElementById('cc-legend');if(legEl)legEl.innerHTML='';
       return;
     }
 
-    // Stat 1: Highest ASP hospital (min 5 cases)
-    const byHosp={};
-    valid.forEach(c=>{
-      if(!byHosp[c.hospitalName])byHosp[c.hospitalName]={asp:[],city:c.city,count:0};
-      byHosp[c.hospitalName].asp.push(c.approvalAmount);
-      byHosp[c.hospitalName].count++;
-    });
-    const hospList=Object.entries(byHosp).map(([name,d])=>({name,avg:Math.round(d.asp.reduce((s,v)=>s+v,0)/d.asp.length),count:d.count,city:d.city}));
-    const highASP=hospList.filter(h=>h.count>=5).sort((a,b)=>b.avg-a.avg)[0];
+    // Aggregate by city
+    const allCities=new Set();
+    const curByCity={},prevByCity={};
+    curCases.forEach(c=>{allCities.add(c.city);if(!curByCity[c.city])curByCity[c.city]=[];curByCity[c.city].push(c.approvalAmount);});
+    prevCases.forEach(c=>{allCities.add(c.city);if(!prevByCity[c.city])prevByCity[c.city]=[];prevByCity[c.city].push(c.approvalAmount);});
 
-    // Stat 2: Most active hospital (most cases)
-    const mostActive=hospList.sort((a,b)=>b.count-a.count)[0];
+    const cities=[...allCities].sort();
+    const curVals=cities.map(c=>curByCity[c]?Math.round(avg(curByCity[c])):0);
+    const prevVals=cities.map(c=>prevByCity[c]?Math.round(avg(prevByCity[c])):0);
+    const pctChange=curVals.map((v,i)=>prevVals[i]?Math.round(((v-prevVals[i])/prevVals[i])*100):0);
+    const cityLabels=cities.map(c=>cityLabel(c));
 
-    // Stat 3: Best performing city
-    const byCity={};
-    valid.forEach(c=>{if(!byCity[c.city])byCity[c.city]=[];byCity[c.city].push(c.approvalAmount);});
-    const bestCity=Object.entries(byCity).map(([city,vals])=>({city,avg:Math.round(vals.reduce((s,v)=>s+v,0)/vals.length),count:vals.length})).sort((a,b)=>b.avg-a.avg)[0];
+    // Legend
+    const legEl=document.getElementById('cc-legend');
+    if(legEl)legEl.innerHTML=`
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#cbd5e1;display:inline-block;"></span>${esc(prevLabel)}</span>
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#0ea5e9;display:inline-block;"></span>${esc(curLabel)}</span>`;
 
-    // Stat 4: Most used insurer
-    const byIns={};
-    cases.forEach(c=>{if(c.insuranceName)byIns[c.insuranceName]=(byIns[c.insuranceName]||0)+1;});
-    const topIns=Object.entries(byIns).sort(([,a],[,b])=>b-a)[0];
-
-    const stats=[
-      {icon:'🏆',label:'Highest ASP Hospital',value:highASP?'₹'+fmtN(highASP.avg):'—',sub:highASP?esc(highASP.name.split(',')[0].slice(0,28)):'Min 5 cases needed',color:'#0284c7',bg:'linear-gradient(135deg,#0284c7,#0ea5e9)'},
-      {icon:'🏥',label:'Most Active Hospital',value:mostActive?mostActive.count+' cases':'—',sub:mostActive?esc(mostActive.name.split(',')[0].slice(0,28)):'—',color:'#059669',bg:'linear-gradient(135deg,#059669,#10b981)'},
-      {icon:'🌆',label:'Best Performing City',value:bestCity?'₹'+fmtN(bestCity.avg):'—',sub:bestCity?cityLabel(bestCity.city)+' ('+bestCity.count+' cases)':'—',color:'#7c3aed',bg:'linear-gradient(135deg,#7c3aed,#a78bfa)'},
-      {icon:'🛡️',label:'Most Used Insurer',value:topIns?topIns[1]+' cases':'—',sub:topIns?esc(topIns[0].slice(0,28)):'—',color:'#d97706',bg:'linear-gradient(135deg,#d97706,#f59e0b)'},
-    ];
-
-    el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:4px;">
-      ${stats.map(s=>`<div style="background:${s.bg};border-radius:10px;padding:14px;color:#fff;">
-        <div style="font-size:18px;margin-bottom:4px;">${s.icon}</div>
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;opacity:.8;margin-bottom:4px;">${s.label}</div>
-        <div style="font-size:20px;font-weight:800;letter-spacing:-.5px;margin-bottom:3px;">${s.value}</div>
-        <div style="font-size:11px;opacity:.85;">${s.sub}</div>
-      </div>`).join('')}
-    </div>`;
+    charts.cityCat=new Chart(ctx,{type:'bar',data:{labels:cityLabels,datasets:[
+      {label:prevLabel,data:prevVals,backgroundColor:'#cbd5e1',borderRadius:4,maxBarThickness:28},
+      {label:curLabel,data:curVals,backgroundColor:'#0ea5e9',borderRadius:4,maxBarThickness:28}
+    ]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:36,right:10}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': ₹'+fmtN(c.raw),afterBody:items=>{const idx=items[0].dataIndex;const chg=pctChange[idx];return 'Change: '+(chg>=0?'+':'')+chg+'%';}}}},scales:{x:{ticks:{font:{size:10},maxRotation:35},grid:{display:false}},y:{ticks:{font:{size:10},callback:v=>'₹'+fmtN(v)},grid:{color:'#f0f0f0'},beginAtZero:false}},animation:{onComplete:function(){const chart=this;const c2=chart.ctx;c2.save();const meta=chart.getDatasetMeta(1);meta.data.forEach((bar,j)=>{const v=curVals[j];if(!v)return;c2.font='bold 9px DM Sans,sans-serif';c2.textAlign='center';c2.textBaseline='bottom';c2.fillStyle='#0284c7';c2.fillText('₹'+fmtN(v),bar.x,bar.y-16);const chg=pctChange[j];if(prevVals[j]){const arrow=chg>=0?'↑':'↓';c2.fillStyle=chg>=0?'#059669':'#dc2626';c2.font='bold 10px DM Sans,sans-serif';c2.fillText(arrow+Math.abs(chg)+'%',bar.x,bar.y-4);}});c2.restore();}}}});
   }
 
-  // ASP Trend with data labels
+  // ASP Trend with 2 lines: Avg ASP + Cases
   function renderTrend(cases){
     const validCases=cases.filter(c=>c.approvalAmount!==null&&c.doaParsed);
     const grouped={};
@@ -110,11 +156,18 @@ const PAGE2 = (() => {
     });
     const sorted=Object.entries(grouped).sort(([a],[b])=>a.localeCompare(b));
     const labels=sorted.map(([k])=>{if(trendMode==='yearly'||trendMode==='quarterly')return k;const[yr,mo]=k.split('-');return['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+mo-1]+'\''+yr.slice(2);});
-    const data=sorted.map(([,v])=>Math.round(v.reduce((s,x)=>s+x,0)/v.length));
+    const avgData=sorted.map(([,v])=>Math.round(v.reduce((s,x)=>s+x,0)/v.length));
     const counts=sorted.map(([,v])=>v.length);
     destroyChart('trend');
     const ctx=document.getElementById('chart-trend');if(!ctx)return;
-    charts.trend=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Avg ASP',data,borderColor:'#0ea5e9',backgroundColor:'rgba(14,165,233,.08)',borderWidth:2.5,pointRadius:4,pointBackgroundColor:'#0ea5e9',tension:.3,fill:true}]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`₹${fmtN(c.raw)}`,afterLabel:c=>`Cases: ${counts[c.dataIndex]}`}}},scales:{x:{ticks:{font:{size:10},maxRotation:35},grid:{display:false}},y:{ticks:{font:{size:10},callback:v=>'₹'+fmtN(v)},grid:{color:'#f0f0f0'}}},animation:{onComplete:function(){const chart=this;const ctx2=chart.ctx;ctx2.save();ctx2.font='bold 10px DM Sans,sans-serif';ctx2.fillStyle='#0284c7';ctx2.textAlign='center';chart.data.datasets.forEach((ds,i)=>{chart.getDatasetMeta(i).data.forEach((pt,j)=>{const v=ds.data[j];if(!v)return;ctx2.fillText('₹'+fmtN(v),pt.x,pt.y-8);});});ctx2.restore();}}}});
+    charts.trend=new Chart(ctx,{type:'line',data:{labels,datasets:[
+      {label:'Avg ASP',data:avgData,borderColor:'#0ea5e9',backgroundColor:'rgba(14,165,233,.08)',borderWidth:2.5,pointRadius:4,pointBackgroundColor:'#0ea5e9',tension:.3,fill:true,yAxisID:'y'},
+      {label:'Cases',data:counts,borderColor:'#10b981',borderWidth:2.5,pointRadius:4,pointBackgroundColor:'#10b981',borderDash:[6,3],tension:.3,fill:false,yAxisID:'y1'}
+    ]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.datasetIndex===0?'Avg ASP: ₹'+fmtN(c.raw):'Cases: '+c.raw}}},scales:{x:{ticks:{font:{size:10},maxRotation:35},grid:{display:false}},y:{position:'left',ticks:{color:'#0ea5e9',font:{size:10},callback:v=>'₹'+fmtN(v)},grid:{color:'#f0f0f0'},title:{display:true,text:'Avg ASP',color:'#0ea5e9',font:{size:11}}},y1:{position:'right',ticks:{color:'#10b981',font:{size:10}},grid:{display:false},title:{display:true,text:'Cases',color:'#10b981',font:{size:11}}}},animation:{onComplete:function(){const chart=this;const c2=chart.ctx;c2.save();c2.font='bold 9px DM Sans,sans-serif';c2.textAlign='center';const meta0=chart.getDatasetMeta(0);meta0.data.forEach((pt,j)=>{const v=chart.data.datasets[0].data[j];if(!v)return;c2.fillStyle='#0284c7';c2.fillText('₹'+fmtN(v),pt.x,pt.y-10);});const meta1=chart.getDatasetMeta(1);meta1.data.forEach((pt,j)=>{const v=chart.data.datasets[1].data[j];if(!v)return;c2.fillStyle='#059669';c2.fillText(v,pt.x,pt.y-10);});c2.restore();}}}});
+    const leg=document.getElementById('trend-legend');
+    if(leg)leg.innerHTML=`
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:3px;background:#0ea5e9;border-radius:2px;display:inline-block;"></span>Avg ASP (₹)</span>
+      <span style="display:flex;align-items:center;gap:4px;"><span style="width:14px;height:0;border-top:2.5px dashed #10b981;display:inline-block;"></span>Cases</span>`;
   }
 
   function setTrendMode(mode){
@@ -201,7 +254,6 @@ const PAGE2 = (() => {
     let cases=DATA.aspCases;
     if(th.city)    cases=cases.filter(c=>c.city===th.city);
     if(th.category)cases=cases.filter(c=>c.category.toLowerCase()===th.category.toLowerCase());
-    if(th.procedure)cases=cases.filter(c=>c.procedureGroup===th.procedure);
     if(th.insurer) cases=cases.filter(c=>c.insuranceName===th.insurer);
     if(th.tpa)     cases=cases.filter(c=>c.tpaName===th.tpa);
     if(th.year)    cases=cases.filter(c=>c.doaParsed&&c.doaParsed.getFullYear()===parseInt(th.year));
@@ -354,8 +406,7 @@ const PAGE2 = (() => {
     const thYrs=[['','All Years'],...[...new Set(DATA.aspCases.map(c=>c.doaParsed&&c.doaParsed.getFullYear()).filter(Boolean))].sort().map(y=>[y,String(y)])];
     const thMos=[['','All Months'],['01','Jan'],['02','Feb'],['03','Mar'],['04','Apr'],['05','May'],['06','Jun'],['07','Jul'],['08','Aug'],['09','Sep'],['10','Oct'],['11','Nov'],['12','Dec']];
     fillSel('th-year',thYrs,'');fillSel('th-month',thMos,'');
-    fillSel('th-city',cities,'');fillSel('th-category',cats,'');
-    fillSel('th-procedure',[['','All Procedures'],...(th.category?getProceduresForCategory(th.category):Object.values(CONFIG.PROCEDURE_GROUPS||{}).filter((v,i,a)=>a.indexOf(v)===i).sort()).map(p=>[p,p])],'');fillSel('th-insurer',insurers,'');fillSel('th-tpa',tpas,'');
+    fillSel('th-city',cities,'');fillSel('th-category',cats,'');fillSel('th-insurer',insurers,'');fillSel('th-tpa',tpas,'');
   }
 
   function runComparison(){
@@ -368,8 +419,9 @@ const PAGE2 = (() => {
     recs=recs.filter(r=>{
       const h=hospLookup[r.hospitalName.toLowerCase().trim()];
       if(!h||h.activeStatus!=='Active')return false;
-      // Exclude if explicitly marked No (depaneled)
+      if(insurer && h.insurer[insurer]!==true && h.insurerRaw && h.insurerRaw[insurer]!=='No')return false;
       if(insurer && h.insurerRaw && h.insurerRaw[insurer]==='No')return false;
+      if(tpa && h.tpa[tpa]!==true && h.tpaRaw && h.tpaRaw[tpa]!=='No')return false;
       if(tpa && h.tpaRaw && h.tpaRaw[tpa]==='No')return false;
       return true;
     }).slice(0,3);
@@ -411,58 +463,6 @@ const PAGE2 = (() => {
     fillSel('p2-hospital',[['','All Hospitals'],...[...new Set(DATA.aspCases.map(c=>c.hospitalName))].sort().map(h=>[h,h])],f.hospital);
   }
 
-
-  function downloadTopHospitalsCSV(){
-    // Apply same filters as renderTopHospitals
-    let cases=DATA.aspCases;
-    if(th.city)     cases=cases.filter(c=>c.city===th.city);
-    if(th.category) cases=cases.filter(c=>c.category.toLowerCase()===th.category.toLowerCase());
-    if(th.procedure)cases=cases.filter(c=>c.procedureGroup===th.procedure);
-    if(th.insurer)  cases=cases.filter(c=>c.insuranceName===th.insurer);
-    if(th.tpa)      cases=cases.filter(c=>c.tpaName===th.tpa);
-    if(th.year)     cases=cases.filter(c=>c.doaParsed&&c.doaParsed.getFullYear()===parseInt(th.year));
-    if(th.month)    cases=cases.filter(c=>c.doaParsed&&String(c.doaParsed.getMonth()+1).padStart(2,'0')===th.month);
-
-    // Build ranked hospital list (same logic as renderTopHospitals)
-    const byHosp={};
-    cases.forEach(c=>{
-      if(!c.approvalAmount)return;
-      if(!byHosp[c.hospitalName])byHosp[c.hospitalName]={asp:[],count:0};
-      byHosp[c.hospitalName].asp.push(c.approvalAmount);
-      byHosp[c.hospitalName].count++;
-    });
-    const ranked=Object.entries(byHosp)
-      .map(([name,d])=>({name,avgAsp:Math.round(d.asp.reduce((s,v)=>s+v,0)/d.asp.length),count:d.count}))
-      .sort((a,b)=>th.mode==='asp'?b.avgAsp-a.avgAsp:b.count-a.count);
-
-    // Top N or all hospitals
-    const topN=th.top==='all'?ranked.length:parseInt(th.top)||10;
-    const topNames=new Set(ranked.slice(0,topN).map(r=>r.name));
-
-    // Export ALL cases for those hospitals (not just ones with approval amount)
-    const exportCases=cases.filter(c=>topNames.has(c.hospitalName));
-
-    if(!exportCases.length){alert('No data to download for current filters.');return;}
-
-    const headers=['IPD ID','Lead ID','Patient Name','DOD','Insurance Name','TPA Name','City Bucket','Category','Procedure','Bill Amount','Approval Amount','Waive Off?','Waive Off Amount'];
-    const csvRows=exportCases.map(c=>[
-      c.ipdId,c.leadId,c.patientName,c.dodRaw,
-      c.insuranceName,c.tpaName,c.cityBucket,
-      c.category,c.procedureRaw,
-      c.billAmount!==null?c.billAmount:'',
-      c.approvalAmount!==null?c.approvalAmount:'',
-      c.waiveOff||'',
-      c.waiveOffAmount!==null?c.waiveOffAmount:''
-    ].map(v=>`"${String(v===null||v===undefined?'':v).replace(/"/g,'""')}"`).join(','));
-
-    const csv=[headers.map(h=>`"${h}"`).join(','),...csvRows].join('\n');
-    const a=document.createElement('a');
-    a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
-    a.download=`top_hospitals_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    console.log('[Hexa] Downloaded',exportCases.length,'cases for',topNames.size,'hospitals');
-  }
-
   function bindEvents(){
     ['year','quarter','month','city','category','insurer','tpa','hospital','status'].forEach(k=>{
       document.getElementById('p2-'+k)?.addEventListener('change',e=>{f[k]=e.target.value;renderAll();});
@@ -470,17 +470,10 @@ const PAGE2 = (() => {
     on('p2-clear',()=>{Object.keys(f).forEach(k=>f[k]='');renderFilters();renderAll();});
     on('comp-go',runComparison);
     on('comp-cat','change',()=>{const cat=document.getElementById('comp-cat')?.value;fillSel('comp-proc',[['','All Procedures'],...getProceduresForCategory(cat).map(p=>[p,p])],'');});
-    ['th-city','th-category','th-procedure','th-insurer','th-tpa','th-year','th-month','th-top'].forEach(id=>{
+    ['th-city','th-category','th-insurer','th-tpa','th-year','th-month','th-top'].forEach(id=>{
       const key=id.replace('th-','');document.getElementById(id)?.addEventListener('change',e=>{th[key]=e.target.value;renderTopHospitals();});
     });
     on('th-reset',()=>{Object.keys(th).forEach(k=>{if(k!=='mode'&&k!=='top')th[k]='';});populateComparators();renderTopHospitals();});
-    on('th-download','click',downloadTopHospitalsCSV);
-    document.getElementById('th-category')?.addEventListener('change',e=>{
-      th.category=e.target.value;
-      fillSel('th-procedure',[['','All Procedures'],...getProceduresForCategory(th.category).map(p=>[p,p])],'');
-      th.procedure='';
-      renderTopHospitals();
-    });
   }
 
   function on(id,evOrFn,fn){

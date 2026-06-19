@@ -6,7 +6,7 @@
 <title>HexaHealth Hospital Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=26">
+<link rel="stylesheet" href="styles.css?v=19">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 </head>
 <body>
@@ -163,9 +163,22 @@
     <button class="btn btn-outline" id="p2-clear">↺ Reset</button>
   </div>
 
-  <!-- Top rec + ASP trend -->
-  <div style="display:grid;grid-template-columns:1fr 1.6fr;gap:14px;margin-bottom:14px;">
-    <div class="section-card" style="padding:0;overflow:hidden;"><div id="p2-top-rec" style="padding:18px;"></div></div>
+  <!-- City-wise Category Comparison + ASP Trend -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+    <div class="section-card">
+      <div class="section-header">
+        <span class="section-title">City-wise Category Comparison</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;margin-bottom:8px;">
+        <div class="filter-group"><div class="filter-label">Year</div><select id="cc-year" style="min-width:80px;"></select></div>
+        <div class="filter-group"><div class="filter-label">Quarter</div><select id="cc-quarter" style="min-width:80px;"><option value="">All</option><option value="1">Q1</option><option value="2">Q2</option><option value="3">Q3</option><option value="4">Q4</option></select></div>
+        <div class="filter-group"><div class="filter-label">Month</div><select id="cc-month" style="min-width:90px;"></select></div>
+        <div class="filter-group"><div class="filter-label">Category</div><select id="cc-category" style="min-width:110px;"></select></div>
+      </div>
+      <div id="cc-period-label" style="font-size:11px;color:var(--text3);margin-bottom:4px;"></div>
+      <div id="cc-legend" style="display:flex;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--text2);margin-bottom:6px;"></div>
+      <div class="chart-wrap"><canvas id="chart-city-cat"></canvas></div>
+    </div>
     <div class="section-card">
       <div class="section-header">
         <span class="section-title">ASP Trend</span>
@@ -176,6 +189,7 @@
         </div>
       </div>
       <div class="chart-wrap"><canvas id="chart-trend"></canvas></div>
+      <div id="trend-legend" style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--text2);margin-top:6px;padding:0 4px;"></div>
     </div>
   </div>
 
@@ -194,14 +208,12 @@
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px;">
       <div class="filter-group"><div class="filter-label">City</div><select id="th-city"></select></div>
       <div class="filter-group"><div class="filter-label">Category</div><select id="th-category"></select></div>
-      <div class="filter-group"><div class="filter-label">Procedure</div><select id="th-procedure" style="min-width:175px;"></select></div>
       <div class="filter-group"><div class="filter-label">Insurer</div><select id="th-insurer" style="min-width:160px;"></select></div>
       <div class="filter-group"><div class="filter-label">TPA</div><select id="th-tpa" style="min-width:150px;"></select></div>
       <div class="filter-group"><div class="filter-label">Year</div><select id="th-year"></select></div>
       <div class="filter-group"><div class="filter-label">Month</div><select id="th-month"></select></div>
-      <div class="filter-group"><div class="filter-label">Show Top</div><select id="th-top"><option value="5">Top 5</option><option value="10" selected>Top 10</option><option value="20">Top 20</option><option value="50">Top 50</option><option value="all">All Hospitals</option></select></div>
+      <div class="filter-group"><div class="filter-label">Show Top</div><select id="th-top"><option value="5">Top 5</option><option value="10" selected>Top 10</option><option value="20">Top 20</option><option value="50">Top 50</option></select></div>
       <button class="btn btn-outline" id="th-reset">↺</button>
-      <button class="btn btn-teal" id="th-download" style="margin-left:auto;">⬇ Download CSV</button>
     </div>
     <div id="th-summary" style="font-size:12px;color:var(--text3);margin-bottom:10px;"></div>
     <div style="display:flex;gap:6px;margin-bottom:10px;">
@@ -297,12 +309,12 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="pincodes.js?v=26"></script>
-<script src="config.js?v=26"></script>
-<script src="data.js?v=26"></script>
-<script src="page1.js?v=26"></script>
-<script src="page2.js?v=26"></script>
-<script src="page3.js?v=26"></script>
+<script src="pincodes.js?v=19"></script>
+<script src="config.js?v=19"></script>
+<script src="data.js?v=19"></script>
+<script src="page1.js?v=19"></script>
+<script src="page2.js?v=19"></script>
+<script src="page3.js?v=19"></script>
 <script>
 window.closeModal=function(){document.getElementById('detail-overlay').classList.remove('open');document.querySelectorAll('.hospital-row.selected').forEach(r=>r.classList.remove('selected'));};
 function showPage(id){

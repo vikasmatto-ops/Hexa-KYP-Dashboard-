@@ -241,9 +241,6 @@ function parseASPData(rows) {
     cases.push({
       ipdId:           (r[idx['IPD ID']] || '').trim(),
       leadId:          (r[idx['Lead ID']] || '').trim().replace(/\.0+$/,'').replace(/e\+\d+/i,''),
-      patientName:     (r[idx['Patient Name']] || '').trim(),
-      waiveOff:        (r[idx['Waive Off?']] || '').trim(),
-      waiveOffAmount:  parseAmount(r[idx['Waive Off Amount']]),
       category:        (r[idx['Category']] || '').trim(),
       mop:             (r[idx['Mode of Payment (MoP)']] || '').trim(),
       procedureRaw:    (r[idx['Procedure']] || '').trim(),
