@@ -28,9 +28,15 @@ const PAGE4 = (() => {
   function cityLabel(c){return CONFIG.CITY_DISPLAY[c]||c.charAt(0).toUpperCase()+c.slice(1);}
   function caseDate(c){return c.dodParsed||c.doaParsed||null;}
   function catColor(cat){return CAT_COLORS[(cat||'').toUpperCase()]||'#94a3b8';}
+  const CAT_MAP = {
+    'UROLOGY':'UROLOGY','PROCTOLOGY':'PROCTOLOGY','LAPAROSCOPY':'LAPAROSCOPY',
+    'AESTHETICS / PLASTIC SURGERY':'AESTHETICS / PLASTIC SURGERY',
+    'KIDNEY STONE':'KIDNEY STONE','VASCULAR':'VASCULAR'
+  };
+
   function normCat(cat){
-    const u=(cat||'').toUpperCase().trim();
-    return RELEVANT_CATS.includes(u)?u:'OTHERS';
+    const u=(cat||'').trim().toUpperCase();
+    return CAT_MAP[u]||'OTHERS';
   }
 
   // ── Get cases, normalise category, apply filters ─────────
@@ -144,59 +150,169 @@ const PAGE4 = (() => {
   }
 
   // ═══════════════════════════════════════════════════════
-  // 2. CATEGORY MIX — Cards with sparkline (last 7 months)
+  // 2. CATEGORY MIX — Cards with trend arrow + dual comparison
   // ═══════════════════════════════════════════════════════
+  let mixMode = 'monthly'; // monthly | quarterly | yearly | mtd | ytd
+
+  function getPeriodCases(mode){
+    // Returns {cur, prev, lyPrev, curLabel, prevLabel, lyLabel}
+    // cur = current period, prev = previous period, lyPrev = same period last year
+    const all = DATA.aspCases.filter(c=>{
+      const dt=caseDate(c);
+      return dt && c.approvalAmount!==null && (!f.city||c.city===f.city) && selectedCats.includes(normCat(c.category));
+    }).map(c=>{const dt=caseDate(c);return{...c,dt,cat:normCat(c.category),ym:`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`,mo:dt.getMonth()+1,yr:dt.getFullYear(),qtr:Math.ceil((dt.getMonth()+1)/3)};});
+
+    const now = new Date();
+    const curYr = now.getFullYear(), curMo = now.getMonth()+1, curDay = now.getDate();
+
+    // Find latest data month
+    const months=[...new Set(all.map(c=>c.ym))].sort();
+    const latestYm=months[months.length-1];
+    if(!latestYm)return{cur:[],prev:[],lyPrev:[],curLabel:'—',prevLabel:'—',lyLabel:'—'};
+    const [lyr,lmo]=[parseInt(latestYm.split('-')[0]),parseInt(latestYm.split('-')[1])];
+
+    let curF,prevF,lyF,curLabel,prevLabel,lyLabel;
+
+    if(mode==='monthly'){
+      curF=c=>c.yr===lyr&&c.mo===lmo;
+      const pm=lmo===1?12:lmo-1,py=lmo===1?lyr-1:lyr;
+      prevF=c=>c.yr===py&&c.mo===pm;
+      lyF=c=>c.yr===lyr-1&&c.mo===lmo;
+      curLabel=MN[lmo-1]+"'"+String(lyr).slice(2);
+      prevLabel=MN[pm-1]+"'"+(lmo===1?String(lyr-1):String(lyr)).slice(2);
+      lyLabel=MN[lmo-1]+"'"+String(lyr-1).slice(2);
+    } else if(mode==='quarterly'){
+      const cq=Math.ceil(lmo/3);
+      curF=c=>c.yr===lyr&&c.qtr===cq;
+      const pq=cq===1?4:cq-1,py=cq===1?lyr-1:lyr;
+      prevF=c=>c.yr===py&&c.qtr===pq;
+      lyF=c=>c.yr===lyr-1&&c.qtr===cq;
+      curLabel=`Q${cq} '${String(lyr).slice(2)}`;
+      prevLabel=`Q${pq} '${String(py).slice(2)}`;
+      lyLabel=`Q${cq} '${String(lyr-1).slice(2)}`;
+    } else if(mode==='yearly'){
+      curF=c=>c.yr===lyr;
+      prevF=c=>c.yr===lyr-1;
+      lyF=c=>c.yr===lyr-2;
+      curLabel=String(lyr);prevLabel=String(lyr-1);lyLabel=String(lyr-2);
+    } else if(mode==='mtd'){
+      curF=c=>c.yr===lyr&&c.mo===lmo&&c.dt.getDate()<=curDay;
+      const pm=lmo===1?12:lmo-1,py=lmo===1?lyr-1:lyr;
+      prevF=c=>c.yr===py&&c.mo===pm&&c.dt.getDate()<=curDay;
+      lyF=c=>c.yr===lyr-1&&c.mo===lmo&&c.dt.getDate()<=curDay;
+      curLabel='MTD '+MN[lmo-1];prevLabel='MTD '+MN[pm-1];lyLabel='MTD '+MN[lmo-1]+' LY';
+    } else { // ytd
+      curF=c=>c.yr===lyr&&(c.mo<lmo||(c.mo===lmo));
+      prevF=c=>c.yr===lyr-1&&(c.mo<lmo||(c.mo===lmo));
+      lyF=c=>c.yr===lyr-2&&(c.mo<lmo||(c.mo===lmo));
+      curLabel=`YTD '${String(lyr).slice(2)}`;prevLabel=`YTD '${String(lyr-1).slice(2)}`;lyLabel=`YTD '${String(lyr-2).slice(2)}`;
+    }
+
+    return{cur:all.filter(curF),prev:all.filter(prevF),lyPrev:all.filter(lyF),curLabel,prevLabel,lyLabel};
+  }
+
+  function trendArrow(vals){
+    // vals = array of last 3 period values (oldest first)
+    if(vals.length<2)return{arrow:'→',color:'#94a3b8'};
+    const last=vals[vals.length-1],first=vals[0];
+    const chg=first?((last-first)/first*100):0;
+    if(chg>10)return{arrow:'↑',color:'#10b981'};
+    if(chg>3)return{arrow:'↗',color:'#10b981'};
+    if(chg>-3)return{arrow:'→',color:'#94a3b8'};
+    if(chg>-10)return{arrow:'↘',color:'#ef4444'};
+    return{arrow:'↓',color:'#ef4444'};
+  }
+
   function renderCategoryMix(){
     const el=document.getElementById('p4-cat-grid');if(!el)return;
-    const cases=getAllCases();
-    if(!cases.length){el.innerHTML='<div style="color:var(--text3);padding:14px;">No data</div>';return;}
 
-    const allMonths=[...new Set(cases.map(c=>c.ym))].sort().slice(-7);
-    const latestMo=allMonths[allMonths.length-1];
-    const prevMo=allMonths[allMonths.length-2]||latestMo;
+    // Render mode toggle buttons
+    const toggleEl=document.getElementById('p4-mix-toggle');
+    if(toggleEl){
+      const modes=[['monthly','Monthly'],['quarterly','Quarterly'],['yearly','Yearly'],['mtd','MTD'],['ytd','YTD']];
+      toggleEl.innerHTML=modes.map(([m,l])=>`<button onclick="PAGE4._setMixMode('${m}')" style="padding:3px 10px;border-radius:20px;border:1.5px solid ${mixMode===m?'#0ea5e9':'var(--border)'};background:${mixMode===m?'#e0f2fe':'transparent'};font-size:11px;font-weight:${mixMode===m?'600':'400'};cursor:pointer;color:${mixMode===m?'#0369a1':'var(--text-secondary)'};">${l}</button>`).join('');
+    }
 
-    const cats=[...new Set(cases.filter(c=>allMonths.includes(c.ym)).map(c=>c.cat))];
+    const {cur,prev,lyPrev,curLabel,prevLabel,lyLabel}=getPeriodCases(mixMode);
+    if(!cur.length){el.innerHTML='<div style="color:var(--text-secondary);padding:14px;">No data for selected period.</div>';return;}
+
+    const cats=[...new Set([...cur,...prev,...lyPrev].map(c=>c.cat))];
+    const curTotal=cur.length||1,prevTotal=prev.length||1,lyTotal=lyPrev.length||1;
+
+    // For trend arrow: get last 3 periods' share for each cat
+    const allMs=[...new Set(DATA.aspCases.filter(c=>caseDate(c)).map(c=>{const d=caseDate(c);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;}))].sort().slice(-4);
+
     const catData=cats.map(cat=>{
-      const latestCases=cases.filter(c=>c.cat===cat&&c.ym===latestMo);
-      const prevCases=cases.filter(c=>c.cat===cat&&c.ym===prevMo);
-      const latestTotal=cases.filter(c=>c.ym===latestMo).length||1;
-      const prevTotal=cases.filter(c=>c.ym===prevMo).length||1;
-      const latestShare=latestCases.length/latestTotal*100;
-      const prevShare=prevCases.length/prevTotal*100;
-      const latestASP=avg(latestCases.map(c=>c.approvalAmount));
-      const prevASP=avg(prevCases.map(c=>c.approvalAmount));
+      const cc=cur.filter(c=>c.cat===cat);
+      const pc=prev.filter(c=>c.cat===cat);
+      const lc=lyPrev.filter(c=>c.cat===cat);
 
-      // sparkline: monthly share
-      const spark=allMonths.map(mo=>{
-        const mc=cases.filter(c=>c.cat===cat&&c.ym===mo).length;
-        const tc=cases.filter(c=>c.ym===mo).length||1;
-        return Math.round(mc/tc*100);
+      const curShare=cc.length/curTotal*100;
+      const prevShare=pc.length/prevTotal*100;
+      const lyShare=lc.length/lyTotal*100;
+      const curASP=avg(cc.map(c=>c.approvalAmount));
+      const prevASP=avg(pc.map(c=>c.approvalAmount));
+      const lyASP=avg(lc.map(c=>c.approvalAmount));
+
+      // Trend: share change direction over last 3 months
+      const trendVals=allMs.map(ym=>{
+        const mo=DATA.aspCases.filter(c=>{const d=caseDate(c);return d&&`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`===ym;});
+        const catMo=mo.filter(c=>normCat(c.category)===cat);
+        return mo.length?catMo.length/mo.length*100:0;
       });
-      const maxSp=Math.max(...spark,1);
-      const pts=spark.map((v,i)=>`${i*(100/(spark.length-1||1))},${40-v/maxSp*34}`).join(' ');
-      const sparkSVG=`<svg viewBox="0 0 100 42" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:40px;display:block;">
-        <polyline points="${pts}" fill="none" stroke="${catColor(cat)}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        ${spark.map((v,i)=>`<circle cx="${i*(100/(spark.length-1||1))}" cy="${40-v/maxSp*34}" r="2.5" fill="${catColor(cat)}"/>
-          <text x="${i*(100/(spark.length-1||1))}" y="${40-v/maxSp*34-5}" text-anchor="middle" font-size="7.5" fill="${catColor(cat)}" font-weight="700">${v}%</text>`).join('')}
-      </svg>`;
+      const {arrow,color:arrowColor}=trendArrow(trendVals);
 
-      return{cat,latestShare,prevShare,shareChg:latestShare-prevShare,latestASP,aspChg:prevASP?((latestASP-prevASP)/prevASP*100):0,spark,sparkSVG,total:cases.filter(c=>c.cat===cat&&allMonths.includes(c.ym)).length};
+      // Change calcs
+      const shareChgPrev=curShare-prevShare;
+      const aspChgPrev=prevASP?((curASP-prevASP)/prevASP*100):0;
+      const caseChgPrev=cc.length-pc.length;
+      const casePctPrev=pc.length?((cc.length-pc.length)/pc.length*100):0;
+
+      const shareChgLy=curShare-lyShare;
+      const aspChgLy=lyASP?((curASP-lyASP)/lyASP*100):0;
+      const caseChgLy=cc.length-lc.length;
+      const casePctLy=lc.length?((cc.length-lc.length)/lc.length*100):0;
+
+      return{cat,curShare,curASP,curCases:cc.length,arrow,arrowColor,
+        shareChgPrev,aspChgPrev,caseChgPrev,casePctPrev,
+        shareChgLy,aspChgLy,caseChgLy,casePctLy,prevLabel,lyLabel,total:cc.length};
     }).sort((a,b)=>b.total-a.total);
+
+    function fmtChg(v,isAsp){
+      const sign=v>=0?'+':'';
+      if(isAsp)return sign+(v>=0?'+':'')+fmtASP(Math.abs(Math.round(v)));
+      return sign+v.toFixed(1)+'%';
+    }
+    function chgColor(v){return v>0?'#10b981':v<0?'#ef4444':'#94a3b8';}
+    function rowHtml(shareChg,aspChg,caseChg,casePct,label){
+      const sc=chgColor(shareChg),ac=chgColor(aspChg),cc2=chgColor(caseChg);
+      return`<div style="display:flex;justify-content:space-between;font-size:10px;padding:3px 0;">
+        <span style="color:var(--text-secondary);min-width:52px;">vs ${label}</span>
+        <span style="color:${sc};font-weight:500;">${shareChg>=0?'+':''}${shareChg.toFixed(1)}% shr</span>
+        <span style="color:${ac};font-weight:500;">${aspChg>=0?'+':''}${aspChg.toFixed(1)}% ASP</span>
+        <span style="color:${cc2};font-weight:500;">${caseChg>=0?'+':''}${caseChg}(${casePct>=0?'+':''}${casePct.toFixed(0)}%)</span>
+      </div>`;
+    }
 
     el.innerHTML=catData.map(d=>`
       <div style="background:var(--surface2);border-radius:var(--r);padding:12px 14px;border-top:3px solid ${catColor(d.cat)};">
-        <div style="font-size:11px;font-weight:800;color:var(--text);margin-bottom:8px;">${esc(CAT_SHORT[d.cat]||d.cat)}</div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:6px;">
-          <div><div style="font-size:24px;font-weight:900;color:${catColor(d.cat)};line-height:1;">${d.latestShare.toFixed(1)}%</div><div style="font-size:9px;color:var(--text3);">of cases</div></div>
-          <div style="text-align:right;"><div style="font-size:13px;font-weight:700;color:var(--text);">${fmtASP(Math.round(d.latestASP))}</div><div style="font-size:9px;color:var(--text3);">avg ASP</div></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-size:11px;font-weight:700;color:var(--text);">${esc(CAT_SHORT[d.cat]||d.cat)}</span>
+          <span style="font-size:20px;line-height:1;" title="3-month trend">${d.arrow}</span>
         </div>
-        <div style="margin-bottom:8px;">${d.sparkSVG}</div>
-        <div style="display:flex;justify-content:space-between;font-size:10px;border-top:1px solid var(--border);padding-top:6px;">
-          <span style="color:${d.shareChg>=0?'#10b981':'#ef4444'};font-weight:700;">${d.shareChg>=0?'▲':'▼'} ${Math.abs(d.shareChg).toFixed(1)}% share</span>
-          <span style="color:${d.aspChg>=0?'#10b981':'#ef4444'};font-weight:700;">${d.aspChg>=0?'▲':'▼'} ${Math.abs(d.aspChg).toFixed(1)}% ASP</span>
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px;">
+          <div><div style="font-size:24px;font-weight:800;color:${catColor(d.cat)};line-height:1;">${d.curShare.toFixed(1)}%</div><div style="font-size:9px;color:var(--text3);">of cases</div></div>
+          <div style="text-align:right;"><div style="font-size:13px;font-weight:700;color:var(--text);">${fmtASP(Math.round(d.curASP))}</div><div style="font-size:9px;color:var(--text3);">${d.curCases} cases</div></div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:6px;">
+          ${rowHtml(d.shareChgPrev,d.aspChgPrev,d.caseChgPrev,d.casePctPrev,d.prevLabel)}
+          ${rowHtml(d.shareChgLy,d.aspChgLy,d.caseChgLy,d.casePctLy,d.lyLabel)}
         </div>
       </div>`).join('');
   }
+
+  function _setMixMode(mode){mixMode=mode;renderCategoryMix();}
+
 
   // ═══════════════════════════════════════════════════════
   // 3. LAPAROSCOPY BREAKDOWN — quarterly default, labels
@@ -395,5 +511,5 @@ const PAGE4 = (() => {
   function setLapBtn(activeId){['btn-lap-m','btn-lap-q','btn-lap-y'].forEach(id=>{document.getElementById(id)?.classList.toggle('active',id===activeId);});}
 
   function init(){renderFilters();renderCatFilter();renderAll();bindEvents();onDataRefresh(()=>{renderFilters();renderCatFilter();renderAll();});}
-  return{init,_toggleCat};
+  return{init,_toggleCat,_setMixMode};
 })();

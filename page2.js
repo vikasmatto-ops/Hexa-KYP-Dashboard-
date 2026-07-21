@@ -56,23 +56,44 @@ const PAGE2 = (() => {
   }
 
   // City-wise Category Comparison — own filters, sequential period comparison
-  const cc={year:'',quarter:'',month:'',category:''};
+  const cc={year:'',quarter:'',month:'',categories:[]}; // categories = multi-select array
 
   function initCCFilters(){
     const yrs=[['','All Years'],...[...new Set(DATA.aspCases.map(c=>c._dt&&c._dt.getFullYear()).filter(Boolean))].sort().reverse().map(y=>[y,String(y)])];
     const mos=[['','All Months'],['01','Jan'],['02','Feb'],['03','Mar'],['04','Apr'],['05','May'],['06','Jun'],['07','Jul'],['08','Aug'],['09','Sep'],['10','Oct'],['11','Nov'],['12','Dec']];
-    const cats=[['','All Categories'],...CONFIG.ACTIVE_CATEGORIES.map(c=>[c,c])];
-    fillSel('cc-year',yrs,'');fillSel('cc-month',mos,'');fillSel('cc-category',cats,'');
+    fillSel('cc-year',yrs,'');fillSel('cc-month',mos,'');
+    renderCCCatPills();
+  }
+
+  function renderCCCatPills(){
+    const el=document.getElementById('cc-cat-pills');if(!el)return;
+    const cats=CONFIG.ACTIVE_CATEGORIES;
+    el.innerHTML=cats.map(cat=>{
+      const active=cc.categories.includes(cat);
+      return`<label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:3px 9px;border-radius:20px;border:1.5px solid ${active?'#0ea5e9':'var(--border)'};background:${active?'#e0f2fe':'transparent'};font-size:11px;font-weight:600;white-space:nowrap;transition:all .15s;">
+        <input type="checkbox" value="${cat}" ${active?'checked':''} style="display:none;" onchange="PAGE2._ccToggleCat('${cat}')">
+        ${cat.length>20?cat.slice(0,18)+'…':cat}
+      </label>`;
+    }).join('');
+  }
+
+  function _ccToggleCat(cat){
+    if(cc.categories.includes(cat)){cc.categories=cc.categories.filter(c=>c!==cat);}
+    else{cc.categories=[...cc.categories,cat];}
+    renderCCCatPills();
+    renderCityCategoryChart();
   }
 
   function bindCCEvents(){
-    ['cc-year','cc-quarter','cc-month','cc-category'].forEach(id=>{
+    ['cc-year','cc-quarter','cc-month'].forEach(id=>{
       document.getElementById(id)?.addEventListener('change',e=>{cc[id.replace('cc-','')]=e.target.value;renderCityCategoryChart();});
     });
   }
 
   function getCCPeriods(){
-    const cases=DATA.aspCases.filter(c=>c.approvalAmount!==null&&c._dt);
+    let cases=DATA.aspCases.filter(c=>c.approvalAmount!==null&&c._dt);
+    // Apply category multi-select
+    if(cc.categories.length>0){cases=cases.filter(c=>cc.categories.some(cat=>c.category.toLowerCase()===cat.toLowerCase()));}
     let curFilter,prevFilter,curLabel,prevLabel;
 
     if(cc.month&&cc.year){
@@ -89,11 +110,14 @@ const PAGE2 = (() => {
       prevFilter=c=>{const d=c._dt;return d.getFullYear()===py&&Math.ceil((d.getMonth()+1)/3)===pq;};
       curLabel='Q'+q+' '+y;prevLabel='Q'+pq+' '+py;
     } else if(cc.year){
+      // YTD comparison: match same months in both years
       const y=parseInt(cc.year);
+      const curMonths=[...new Set(cases.filter(c=>c._dt.getFullYear()===y).map(c=>c._dt.getMonth()+1))];
       curFilter=c=>c._dt.getFullYear()===y;
-      prevFilter=c=>c._dt.getFullYear()===y-1;
-      curLabel=String(y);prevLabel=String(y-1);
+      prevFilter=c=>c._dt.getFullYear()===y-1&&curMonths.includes(c._dt.getMonth()+1);
+      curLabel=String(y)+' YTD';prevLabel=String(y-1)+' (same months)';
     } else {
+      // Auto: latest month vs previous
       let maxD=null;
       cases.forEach(c=>{if(!maxD||c._dt>maxD)maxD=c._dt;});
       if(!maxD)return{curCases:[],prevCases:[],curLabel:'—',prevLabel:'—'};
@@ -105,8 +129,7 @@ const PAGE2 = (() => {
       curLabel=mn[m-1]+' '+y;prevLabel=mn[pm-1]+' '+py;
     }
 
-    let cur=cases.filter(curFilter),prev=cases.filter(prevFilter);
-    if(cc.category){cur=cur.filter(c=>c.category.toLowerCase()===cc.category.toLowerCase());prev=prev.filter(c=>c.category.toLowerCase()===cc.category.toLowerCase());}
+    const cur=cases.filter(curFilter),prev=cases.filter(prevFilter);
     return{curCases:cur,prevCases:prev,curLabel,prevLabel};
   }
 
@@ -123,26 +146,64 @@ const PAGE2 = (() => {
       return;
     }
 
+    // Collect ALL cities from both periods, normalise city key
+    const normCity=c=>c.cityBucket?c.cityBucket.toLowerCase():(c.city||'').toLowerCase();
     const allCities=new Set();
     const curByCity={},prevByCity={};
-    curCases.forEach(c=>{allCities.add(c.city);if(!curByCity[c.city])curByCity[c.city]=[];curByCity[c.city].push(c.approvalAmount);});
-    prevCases.forEach(c=>{allCities.add(c.city);if(!prevByCity[c.city])prevByCity[c.city]=[];prevByCity[c.city].push(c.approvalAmount);});
+    curCases.forEach(c=>{const city=normCity(c);allCities.add(city);if(!curByCity[city])curByCity[city]={amounts:[],count:0};curByCity[city].amounts.push(c.approvalAmount);curByCity[city].count++;});
+    prevCases.forEach(c=>{const city=normCity(c);allCities.add(city);if(!prevByCity[city])prevByCity[city]={amounts:[],count:0};prevByCity[city].amounts.push(c.approvalAmount);prevByCity[city].count++;});
 
-    const cities=[...allCities].sort();
-    const curVals=cities.map(c=>curByCity[c]?Math.round(avg(curByCity[c])):0);
-    const prevVals=cities.map(c=>prevByCity[c]?Math.round(avg(prevByCity[c])):0);
-    const pctChange=curVals.map((v,i)=>prevVals[i]?Math.round(((v-prevVals[i])/prevVals[i])*100):0);
-    const cityLabels=cities.map(c=>cityLabel(c));
+    // Sort cities by current case volume desc, then map to display labels
+    const cities=[...allCities].sort((a,b)=>(curByCity[b]?.count||0)-(curByCity[a]?.count||0));
+    const curVals=cities.map(c=>curByCity[c]?Math.round(avg(curByCity[c].amounts)):0);
+    const prevVals=cities.map(c=>prevByCity[c]?Math.round(avg(prevByCity[c].amounts)):0);
+    const curCounts=cities.map(c=>curByCity[c]?.count||0);
+    const prevCounts=cities.map(c=>prevByCity[c]?.count||0);
+    const pctChange=curVals.map((v,i)=>prevVals[i]?Math.round(((v-prevVals[i])/prevVals[i])*100):null);
+    const cityLabels=cities.map(c=>cityLabel(c)||c.charAt(0).toUpperCase()+c.slice(1));
 
     const legEl=document.getElementById('cc-legend');
     if(legEl)legEl.innerHTML=`
       <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#cbd5e1;display:inline-block;"></span>${esc(prevLabel)}</span>
       <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#0ea5e9;display:inline-block;"></span>${esc(curLabel)}</span>`;
 
-    charts.cityCat=new Chart(ctx,{type:'bar',data:{labels:cityLabels,datasets:[
-      {label:prevLabel,data:prevVals,backgroundColor:'#cbd5e1',borderRadius:4,maxBarThickness:28},
-      {label:curLabel,data:curVals,backgroundColor:'#0ea5e9',borderRadius:4,maxBarThickness:28}
-    ]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:36,right:10}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': ₹'+fmtN(c.raw),afterBody:items=>{const idx=items[0].dataIndex;const chg=pctChange[idx];return 'Change: '+(chg>=0?'+':'')+chg+'%';}}}},scales:{x:{ticks:{font:{size:10},maxRotation:35},grid:{display:false}},y:{ticks:{font:{size:10},callback:v=>'₹'+fmtN(v)},grid:{color:'#f0f0f0'},beginAtZero:false}},animation:{onComplete:function(){const chart=this;const c2=chart.ctx;c2.save();const meta=chart.getDatasetMeta(1);meta.data.forEach((bar,j)=>{const v=curVals[j];if(!v)return;c2.font='bold 9px DM Sans,sans-serif';c2.textAlign='center';c2.textBaseline='bottom';c2.fillStyle='#0284c7';c2.fillText('₹'+fmtN(v),bar.x,bar.y-16);const chg=pctChange[j];if(prevVals[j]){const arrow=chg>=0?'↑':'↓';c2.fillStyle=chg>=0?'#059669':'#dc2626';c2.font='bold 10px DM Sans,sans-serif';c2.fillText(arrow+Math.abs(chg)+'%',bar.x,bar.y-4);}});c2.restore();}}}});
+    charts.cityCat=new Chart(ctx,{type:'bar',
+      data:{labels:cityLabels,datasets:[
+        {label:prevLabel,data:prevVals,backgroundColor:'#cbd5e1',borderRadius:4,maxBarThickness:32},
+        {label:curLabel,data:curVals,backgroundColor:'#0ea5e9',borderRadius:4,maxBarThickness:32}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:52,right:10}},
+        plugins:{legend:{display:false},tooltip:{callbacks:{
+          label:c=>{const isCur=c.datasetIndex===1;const cnt=isCur?curCounts[c.dataIndex]:prevCounts[c.dataIndex];return c.dataset.label+': ₹'+fmtN(c.raw)+(cnt?' ('+cnt+' cases)':'');},
+          afterBody:items=>{const idx=items[0].dataIndex;const chg=pctChange[idx];return chg!==null?'ASP Change: '+(chg>=0?'+':'')+chg+'%':'';}
+        }}},
+        scales:{x:{ticks:{font:{size:10},maxRotation:35},grid:{display:false}},
+          y:{ticks:{font:{size:10},callback:v=>'₹'+fmtN(v)},grid:{color:'#f0f0f0'},beginAtZero:false}}},
+      plugins:[{id:'ccLabels',afterDatasetsDraw(chart){
+        const c2=chart.ctx;c2.save();
+        // Labels on BOTH bars: prev (gray) and cur (blue)
+        [[0,prevVals,prevCounts,'#64748b'],[1,curVals,curCounts,'#0284c7']].forEach(([di,vals,counts,color])=>{
+          const meta=chart.getDatasetMeta(di);
+          meta.data.forEach((bar,j)=>{
+            const v=vals[j];const cnt=counts[j];
+            if(!v&&!cnt)return;
+            // ASP label
+            c2.font='bold 9px DM Sans,sans-serif';c2.fillStyle=color;c2.textAlign='center';c2.textBaseline='bottom';
+            if(v)c2.fillText('₹'+fmtN(v),bar.x,bar.y-14);
+            // Cases label
+            if(cnt){c2.font='9px DM Sans,sans-serif';c2.fillStyle='#64748b';c2.fillText(cnt+' cases',bar.x,bar.y-4);}
+            // % change on current bar only
+            if(di===1&&pctChange[j]!==null){
+              const chg=pctChange[j];
+              c2.font='bold 9px DM Sans,sans-serif';
+              c2.fillStyle=chg>=0?'#059669':'#dc2626';
+              c2.fillText((chg>=0?'↑':'↓')+Math.abs(chg)+'%',bar.x,bar.y-26);
+            }
+          });
+        });
+        c2.restore();
+      }}]
+    });
   }
 
   // ASP Trend — 2 lines: Avg ASP + Cases (BUG FIX: count ALL cases with valid DOA, not just those with approval amount)
@@ -497,5 +558,5 @@ const PAGE2 = (() => {
   function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function shortIns(n){return n.replace('Health Insurance','Hlth Ins').replace('General Insurance','Gen Ins').replace('Co. Ltd.','').replace('Company Ltd.','').replace('Insurance','Ins').trim().slice(0,22);}
 
-  return{init,setTrendMode,setThMode,toggleAcc};
+  return{init,setTrendMode,setThMode,toggleAcc,_ccToggleCat};
 })();
