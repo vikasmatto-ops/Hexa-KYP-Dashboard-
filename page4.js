@@ -256,15 +256,15 @@ const PAGE4 = (() => {
 
     // Rolling 12 months from latest
     const allYm=[...new Set(cases.map(c=>c.ym))].sort();
-    const window=allYm.slice(-12);
-    if(!window.length)return;
+    const monthWin=allYm.slice(-12);
+    if(!monthWin.length)return;
 
     const cats=[...RELEVANT_CATS,'OTHERS'];
 
     // Compute stacked data
     const stacks=cats.map(cat=>({
       label:CAT_SHORT[cat]||cat,
-      data:window.map(ym=>cases.filter(c=>c.ym===ym&&c.cat===cat).length),
+      data:monthWin.map(ym=>cases.filter(c=>c.ym===ym&&c.cat===cat).length),
       backgroundColor:catColor(cat),
       borderColor:catColor(cat),
       borderWidth:0,
@@ -278,7 +278,7 @@ const PAGE4 = (() => {
     // ASP line
     const aspLine={
       type:'line',label:'Avg ASP',
-      data:window.map(ym=>{const mc=cases.filter(c=>c.ym===ym);return mc.length?Math.round(avg(mc.map(c=>c.approvalAmount))):null;}),
+      data:monthWin.map(ym=>{const mc=cases.filter(c=>c.ym===ym);return mc.length?Math.round(avg(mc.map(c=>c.approvalAmount))):null;}),
       borderColor:'#0f172a',
       backgroundColor:'transparent',
       borderWidth:3,
@@ -292,9 +292,10 @@ const PAGE4 = (() => {
       order:1
     };
 
-    const labels=window.map(ym=>{const[y,m]=ym.split('-');return MN[+m-1]+" '"+y.slice(2);});
+    const labels=monthWin.map(ym=>{const[y,m]=ym.split('-');return MN[+m-1]+" '"+y.slice(2);});
 
     trendChart=new Chart(ctx,{
+      type:'bar',
       data:{labels,datasets:[...stacks,aspLine]},
       options:{
         responsive:true,maintainAspectRatio:false,
