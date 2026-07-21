@@ -6,7 +6,7 @@
 <title>HexaHealth Hospital Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=23">
+<link rel="stylesheet" href="styles.css?v=24">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 </head>
 <body>
@@ -26,6 +26,7 @@
     <div class="sb-item active" id="nav-page1" onclick="showPage('page1')"><span class="sb-icon">🏥</span> Hospital Network</div>
     <div class="sb-item" id="nav-page2" onclick="showPage('page2')"><span class="sb-icon">📊</span> ASP Analytics</div>
     <div class="sb-item" id="nav-page3" onclick="showPage('page3')"><span class="sb-icon">🗺️</span> Coverage Map</div>
+    <div class="sb-item" id="nav-page4" onclick="showPage('page4')"><span class="sb-icon">📈</span> Insights</div>
   </nav>
   <div class="sb-footer">
     <div class="sb-live">
@@ -287,6 +288,53 @@
   </div>
 </div>
 
+<!-- PAGE 4: Insights -->
+<div class="page-content" id="page4">
+
+  <!-- Summary Findings -->
+  <div id="p4-summary" style="margin-bottom:14px;"></div>
+
+  <!-- Filters -->
+  <div class="filter-bar" style="margin-bottom:14px;">
+    <span class="filter-bar-label">FILTERS</span>
+    <div class="filter-group"><div class="filter-label">City</div><select id="p4-city" style="min-width:120px;"></select></div>
+    <div class="filter-group"><div class="filter-label">Category</div><select id="p4-category" style="min-width:130px;"></select></div>
+    <div class="filter-group"><div class="filter-label">Comparison</div><select id="p4-compare"><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select></div>
+    <button class="btn btn-outline" id="p4-clear">↺ Reset</button>
+  </div>
+
+  <!-- Category Mix + Laparoscopy Breakdown -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">
+    <div class="section-card">
+      <div class="section-header"><span class="section-title">Category Mix Trend</span><span class="section-sub" id="p4-mix-sub">Share of cases over time</span></div>
+      <div class="chart-wrap" style="height:320px;"><canvas id="chart-cat-mix"></canvas></div>
+    </div>
+    <div class="section-card">
+      <div class="section-header"><span class="section-title">Laparoscopy Breakdown</span><span class="section-sub">Balloon vs Sleeve vs Cholecystectomy</span></div>
+      <div class="chart-wrap" style="height:320px;"><canvas id="chart-lap-break"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ASP Driver Decomposition -->
+  <div class="section-card" style="margin-bottom:14px;">
+    <div class="section-header"><span class="section-title">ASP Change Drivers</span><span class="section-sub" id="p4-driver-sub">What's moving the average</span></div>
+    <div id="p4-drivers"></div>
+  </div>
+
+  <!-- Empanelment Opportunities -->
+  <div class="section-card">
+    <div class="section-header"><span class="section-title">Empanelment Revenue Opportunities</span><span class="section-sub">High-ASP hospitals missing major insurers</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;margin-bottom:10px;">
+      <div class="filter-group"><div class="filter-label">City</div><select id="emp-city" style="min-width:120px;"></select></div>
+      <div class="filter-group"><div class="filter-label">Category</div><select id="emp-category" style="min-width:130px;"></select></div>
+      <div class="filter-group"><div class="filter-label">Min ASP</div><select id="emp-min-asp"><option value="50000">₹50K+</option><option value="75000">₹75K+</option><option value="100000" selected>₹1L+</option><option value="150000">₹1.5L+</option><option value="200000">₹2L+</option></select></div>
+    </div>
+    <div id="p4-emp-summary" style="margin-bottom:10px;"></div>
+    <div id="p4-emp-table" style="max-height:500px;overflow-y:auto;"></div>
+  </div>
+
+</div>
+
 </div><!-- main -->
 </div><!-- layout -->
 
@@ -309,12 +357,13 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="pincodes.js?v=23"></script>
-<script src="config.js?v=23"></script>
-<script src="data.js?v=23"></script>
-<script src="page1.js?v=23"></script>
-<script src="page2.js?v=23"></script>
-<script src="page3.js?v=23"></script>
+<script src="pincodes.js?v=24"></script>
+<script src="config.js?v=24"></script>
+<script src="data.js?v=24"></script>
+<script src="page1.js?v=24"></script>
+<script src="page2.js?v=24"></script>
+<script src="page3.js?v=24"></script>
+<script src="page4.js?v=24"></script>
 <script>
 window.closeModal=function(){document.getElementById('detail-overlay').classList.remove('open');document.querySelectorAll('.hospital-row.selected').forEach(r=>r.classList.remove('selected'));};
 function showPage(id){
@@ -322,7 +371,7 @@ function showPage(id){
   document.querySelectorAll('.page-content').forEach(p=>p.classList.remove('active'));
   document.getElementById('nav-'+id)?.classList.add('active');
   document.getElementById(id).classList.add('active');
-  const titles={page1:'Hospital Network',page2:'ASP Analytics',page3:'Coverage Map'};
+  const titles={page1:'Hospital Network',page2:'ASP Analytics',page3:'Coverage Map',page4:'Insights'};
   document.getElementById('topbar-title').textContent=titles[id]||'';
   // When switching TO page3, force map redraw
   if(id==='page3'&&window.PAGE3){
@@ -345,7 +394,7 @@ function updateLiveInfo(){
     document.getElementById('loading-overlay').style.display='none';
     updateLiveInfo();
     onDataRefresh(updateLiveInfo);
-    PAGE1.init();PAGE2.init();PAGE3.init();
+    PAGE1.init();PAGE2.init();PAGE3.init();PAGE4.init();
     startAutoRefresh();
     // Wire up refresh button
     document.getElementById('refresh-btn')?.addEventListener('click', async () => {
