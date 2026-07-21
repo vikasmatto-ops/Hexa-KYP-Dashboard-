@@ -244,7 +244,82 @@ const PAGE4 = (() => {
   function _toggleCity(c){if(selectedCities.includes(c))selectedCities=selectedCities.filter(x=>x!==c);else selectedCities=[...selectedCities,c];renderFilters();renderAll();}
   function _clearCities(){selectedCities=[];renderFilters();renderAll();}
 
-  function renderAll(){renderHeadline();renderCategoryCards();}
+  // ══════════════════════════════════════════════════════════
+  // TREND CHART — stacked bar (categories) + ASP overlay line
+  // ══════════════════════════════════════════════════════════
+  let trendChart=null;
+  function renderTrendChart(){
+    const ctx=document.getElementById('p4-trend-canvas');if(!ctx)return;
+    if(trendChart){try{trendChart.destroy();}catch(e){}trendChart=null;}
+    const cases=getAllCases();
+    if(!cases.length)return;
+
+    // Rolling 12 months from latest
+    const allYm=[...new Set(cases.map(c=>c.ym))].sort();
+    const window=allYm.slice(-12);
+    if(!window.length)return;
+
+    const cats=[...RELEVANT_CATS,'OTHERS'];
+
+    // Compute stacked data
+    const stacks=cats.map(cat=>({
+      label:CAT_SHORT[cat]||cat,
+      data:window.map(ym=>cases.filter(c=>c.ym===ym&&c.cat===cat).length),
+      backgroundColor:catColor(cat),
+      borderColor:catColor(cat),
+      borderWidth:0,
+      borderRadius:0,
+      maxBarThickness:44,
+      stack:'cases',
+      order:2,
+      yAxisID:'y'
+    }));
+
+    // ASP line
+    const aspLine={
+      type:'line',label:'Avg ASP',
+      data:window.map(ym=>{const mc=cases.filter(c=>c.ym===ym);return mc.length?Math.round(avg(mc.map(c=>c.approvalAmount))):null;}),
+      borderColor:'#0f172a',
+      backgroundColor:'transparent',
+      borderWidth:3,
+      pointRadius:5,
+      pointBackgroundColor:'#0f172a',
+      pointBorderColor:'#fff',
+      pointBorderWidth:2,
+      tension:.35,
+      fill:false,
+      yAxisID:'y1',
+      order:1
+    };
+
+    const labels=window.map(ym=>{const[y,m]=ym.split('-');return MN[+m-1]+" '"+y.slice(2);});
+
+    trendChart=new Chart(ctx,{
+      data:{labels,datasets:[...stacks,aspLine]},
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        layout:{padding:{top:24,right:10}},
+        interaction:{mode:'index',intersect:false},
+        plugins:{
+          legend:{display:true,position:'bottom',labels:{boxWidth:11,padding:10,font:{size:11},filter:i=>true}},
+          tooltip:{callbacks:{label:c=>c.dataset.label==='Avg ASP'?'Avg ASP: '+fmtASP(c.raw):c.dataset.label+': '+c.raw+' cases'}}
+        },
+        scales:{
+          x:{stacked:true,ticks:{font:{size:10}},grid:{display:false}},
+          y:{stacked:true,position:'left',ticks:{font:{size:10}},grid:{color:'#f1f5f9'},title:{display:true,text:'Cases (stacked by category)',font:{size:11,weight:600},color:'#64748b'},beginAtZero:true},
+          y1:{position:'right',ticks:{font:{size:10},color:'#0f172a',callback:v=>fmtASP(v)},grid:{display:false},title:{display:true,text:'Avg ASP',font:{size:11,weight:600},color:'#0f172a'}}
+        }
+      },
+      plugins:[{id:'aspLbl',afterDatasetsDraw(chart){
+        const ds=chart.data.datasets;const idx=ds.length-1;const meta=chart.getDatasetMeta(idx);
+        const c2=chart.ctx;c2.save();c2.font='bold 10px system-ui,sans-serif';c2.textAlign='center';c2.textBaseline='bottom';
+        meta.data.forEach((pt,j)=>{const v=ds[idx].data[j];if(!v)return;c2.fillStyle='#fff';c2.fillRect(pt.x-24,pt.y-16,48,12);c2.fillStyle='#0f172a';c2.fillText(fmtASP(v).replace('₹',''),pt.x,pt.y-6);});
+        c2.restore();
+      }}]
+    });
+  }
+
+  function renderAll(){renderHeadline();renderTrendChart();renderCategoryCards();}
 
   function init(){renderFilters();renderAll();onDataRefresh(()=>{renderFilters();renderAll();});}
   return{init,_setMode,_toggleCity,_clearCities};

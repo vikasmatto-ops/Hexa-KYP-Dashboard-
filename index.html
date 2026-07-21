@@ -6,7 +6,7 @@
 <title>HexaHealth Hospital Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=33">
+<link rel="stylesheet" href="styles.css?v=34">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 </head>
 <body>
@@ -304,6 +304,16 @@
     </div>
   </div>
 
+  <div style="background:#fff;border-radius:14px;border:0.5px solid #e2e8f0;padding:16px 18px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.04);">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+      <div>
+        <div style="font-size:15px;font-weight:800;color:#0f172a;letter-spacing:-.2px;">Category Volume vs Avg ASP</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">Rolling 12 months · watch Urology's blue stack grow while ASP falls</div>
+      </div>
+    </div>
+    <div style="position:relative;height:360px;margin-top:8px;"><canvas id="p4-trend-canvas"></canvas></div>
+  </div>
+
   <div id="p4-cat-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;"></div>
 
 </div>
@@ -330,13 +340,13 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="pincodes.js?v=33"></script>
-<script src="config.js?v=33"></script>
-<script src="data.js?v=33"></script>
-<script src="page1.js?v=33"></script>
-<script src="page2.js?v=33"></script>
-<script src="page3.js?v=33"></script>
-<script src="page4.js?v=33"></script>
+<script src="pincodes.js?v=34"></script>
+<script src="config.js?v=34"></script>
+<script src="data.js?v=34"></script>
+<script src="page1.js?v=34"></script>
+<script src="page2.js?v=34"></script>
+<script src="page3.js?v=34"></script>
+<script src="page4.js?v=34"></script>
 <script>
 window.closeModal=function(){document.getElementById('detail-overlay').classList.remove('open');document.querySelectorAll('.hospital-row.selected').forEach(r=>r.classList.remove('selected'));};
 function showPage(id){
