@@ -284,29 +284,44 @@ const PAGE4 = (() => {
       return sign+v.toFixed(1)+'%';
     }
     function chgColor(v){return v>0?'#10b981':v<0?'#ef4444':'#94a3b8';}
-    function rowHtml(shareChg,aspChg,caseChg,casePct,label){
-      const sc=chgColor(shareChg),ac=chgColor(aspChg),cc2=chgColor(caseChg);
-      return`<div style="display:flex;justify-content:space-between;font-size:10px;padding:3px 0;">
-        <span style="color:var(--text-secondary);min-width:52px;">vs ${label}</span>
-        <span style="color:${sc};font-weight:500;">${shareChg>=0?'+':''}${shareChg.toFixed(1)}% shr</span>
-        <span style="color:${ac};font-weight:500;">${aspChg>=0?'+':''}${aspChg.toFixed(1)}% ASP</span>
-        <span style="color:${cc2};font-weight:500;">${caseChg>=0?'+':''}${caseChg}(${casePct>=0?'+':''}${casePct.toFixed(0)}%)</span>
+    function rowHtml(shareChg,aspChg,caseChg,label){
+      function fmt(v,isAsp){
+        const sign=v>0?'↑':v<0?'↓':'→';
+        const color=v>0?'#10b981':v<0?'#ef4444':'#94a3b8';
+        let val;
+        if(isAsp){const abs=Math.abs(Math.round(v/1000));val=abs>=1?abs+'K':Math.abs(Math.round(v)).toLocaleString('en-IN');}
+        else val=Math.abs(v).toFixed(1)+'%';
+        return`<span style="color:${color};font-weight:600;white-space:nowrap;">${sign}${isAsp?'₹':''}${val}</span>`;
+      }
+      const cColor=caseChg>0?'#10b981':caseChg<0?'#ef4444':'#94a3b8';
+      const cSign=caseChg>0?'↑':caseChg<0?'↓':'→';
+      return`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--border);flex-wrap:wrap;">
+        <span style="font-size:11px;color:var(--text2);min-width:170px;flex-shrink:0;">${label}</span>
+        ${fmt(shareChg,false)}
+        ${fmt(aspChg,true)}
+        <span style="color:${cColor};font-weight:600;white-space:nowrap;">${cSign}${Math.abs(caseChg)} cases</span>
       </div>`;
     }
 
     el.innerHTML=catData.map(d=>`
-      <div style="background:var(--surface2);border-radius:var(--r);padding:12px 14px;border-top:3px solid ${catColor(d.cat)};">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <span style="font-size:11px;font-weight:700;color:var(--text);">${esc(CAT_SHORT[d.cat]||d.cat)}</span>
-          <span style="font-size:20px;line-height:1;" title="3-month trend">${d.arrow}</span>
+      <div style="background:var(--surface2);border-radius:var(--r);padding:14px;border-top:3px solid ${catColor(d.cat)};">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <span style="font-size:12px;font-weight:700;color:var(--text);">${esc(CAT_SHORT[d.cat]||d.cat)}</span>
+          <span style="font-size:22px;line-height:1;color:${d.arrowColor};">${d.arrow}</span>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px;">
-          <div><div style="font-size:24px;font-weight:800;color:${catColor(d.cat)};line-height:1;">${d.curShare.toFixed(1)}%</div><div style="font-size:9px;color:var(--text3);">of cases</div></div>
-          <div style="text-align:right;"><div style="font-size:13px;font-weight:700;color:var(--text);">${fmtASP(Math.round(d.curASP))}</div><div style="font-size:9px;color:var(--text3);">${d.curCases} cases</div></div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:12px;">
+          <div>
+            <div style="font-size:28px;font-weight:800;color:${catColor(d.cat)};line-height:1;">${d.curShare.toFixed(1)}%</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px;">share of cases</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:14px;font-weight:700;color:var(--text);">${fmtASP(Math.round(d.curASP))}</div>
+            <div style="font-size:13px;font-weight:600;color:var(--text2);">${d.curCases} cases</div>
+          </div>
         </div>
-        <div style="border-top:1px solid var(--border);padding-top:6px;">
-          ${rowHtml(d.shareChgPrev,d.aspChgPrev,d.caseChgPrev,d.casePctPrev,d.prevLabel)}
-          ${rowHtml(d.shareChgLy,d.aspChgLy,d.caseChgLy,d.casePctLy,d.lyLabel)}
+        <div style="border-top:1.5px solid var(--border);padding-top:8px;">
+          ${rowHtml(d.shareChgPrev,d.aspChgPrev,d.caseChgPrev,'vs last period ('+d.prevLabel+')')}
+          ${rowHtml(d.shareChgLy,d.aspChgLy,d.caseChgLy,'vs same period last yr ('+d.lyLabel+')')}
         </div>
       </div>`).join('');
   }

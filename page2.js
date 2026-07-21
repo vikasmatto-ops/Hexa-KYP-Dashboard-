@@ -67,12 +67,16 @@ const PAGE2 = (() => {
 
   function renderCCCatPills(){
     const el=document.getElementById('cc-cat-pills');if(!el)return;
-    const cats=CONFIG.ACTIVE_CATEGORIES;
-    el.innerHTML=cats.map(cat=>{
+    const CC_CATS=['UROLOGY','PROCTOLOGY','LAPAROSCOPY','AESTHETICS / PLASTIC SURGERY','KIDNEY STONE','VASCULAR'];
+    const CC_SHORT={'UROLOGY':'Urology','PROCTOLOGY':'Proctology','LAPAROSCOPY':'Laparoscopy','AESTHETICS / PLASTIC SURGERY':'Aesthetics','KIDNEY STONE':'Kidney Stone','VASCULAR':'Vascular'};
+    const CC_COLORS={'UROLOGY':'#0ea5e9','PROCTOLOGY':'#10b981','LAPAROSCOPY':'#8b5cf6','AESTHETICS / PLASTIC SURGERY':'#f97316','KIDNEY STONE':'#eab308','VASCULAR':'#ec4899'};
+    el.innerHTML=CC_CATS.map(cat=>{
       const active=cc.categories.includes(cat);
-      return`<label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:3px 9px;border-radius:20px;border:1.5px solid ${active?'#0ea5e9':'var(--border)'};background:${active?'#e0f2fe':'transparent'};font-size:11px;font-weight:600;white-space:nowrap;transition:all .15s;">
+      const color=CC_COLORS[cat]||'#0ea5e9';
+      return`<label style="display:flex;align-items:center;gap:4px;cursor:pointer;padding:3px 10px;border-radius:20px;border:1.5px solid ${active?color:'var(--border)'};background:${active?color+'18':'transparent'};font-size:11px;font-weight:600;white-space:nowrap;transition:all .15s;color:${active?color:'var(--text2)'};">
         <input type="checkbox" value="${cat}" ${active?'checked':''} style="display:none;" onchange="PAGE2._ccToggleCat('${cat}')">
-        ${cat.length>20?cat.slice(0,18)+'…':cat}
+        <span style="width:6px;height:6px;border-radius:50%;background:${color};display:inline-block;"></span>
+        ${CC_SHORT[cat]||cat}
       </label>`;
     }).join('');
   }
@@ -172,7 +176,7 @@ const PAGE2 = (() => {
         {label:prevLabel,data:prevVals,backgroundColor:'#cbd5e1',borderRadius:4,maxBarThickness:32},
         {label:curLabel,data:curVals,backgroundColor:'#0ea5e9',borderRadius:4,maxBarThickness:32}
       ]},
-      options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:52,right:10}},
+      options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:38,right:10}},
         plugins:{legend:{display:false},tooltip:{callbacks:{
           label:c=>{const isCur=c.datasetIndex===1;const cnt=isCur?curCounts[c.dataIndex]:prevCounts[c.dataIndex];return c.dataset.label+': ₹'+fmtN(c.raw)+(cnt?' ('+cnt+' cases)':'');},
           afterBody:items=>{const idx=items[0].dataIndex;const chg=pctChange[idx];return chg!==null?'ASP Change: '+(chg>=0?'+':'')+chg+'%':'';}
@@ -181,25 +185,21 @@ const PAGE2 = (() => {
           y:{ticks:{font:{size:10},callback:v=>'₹'+fmtN(v)},grid:{color:'#f0f0f0'},beginAtZero:false}}},
       plugins:[{id:'ccLabels',afterDatasetsDraw(chart){
         const c2=chart.ctx;c2.save();
-        // Labels on BOTH bars: prev (gray) and cur (blue)
-        [[0,prevVals,prevCounts,'#64748b'],[1,curVals,curCounts,'#0284c7']].forEach(([di,vals,counts,color])=>{
-          const meta=chart.getDatasetMeta(di);
-          meta.data.forEach((bar,j)=>{
-            const v=vals[j];const cnt=counts[j];
-            if(!v&&!cnt)return;
-            // ASP label
-            c2.font='bold 9px DM Sans,sans-serif';c2.fillStyle=color;c2.textAlign='center';c2.textBaseline='bottom';
-            if(v)c2.fillText('₹'+fmtN(v),bar.x,bar.y-14);
-            // Cases label
-            if(cnt){c2.font='9px DM Sans,sans-serif';c2.fillStyle='#64748b';c2.fillText(cnt+' cases',bar.x,bar.y-4);}
-            // % change on current bar only
-            if(di===1&&pctChange[j]!==null){
-              const chg=pctChange[j];
-              c2.font='bold 9px DM Sans,sans-serif';
-              c2.fillStyle=chg>=0?'#059669':'#dc2626';
-              c2.fillText((chg>=0?'↑':'↓')+Math.abs(chg)+'%',bar.x,bar.y-26);
-            }
-          });
+        // Only label current (blue) bars — ASP on top, % change above that
+        const meta=chart.getDatasetMeta(1);
+        meta.data.forEach((bar,j)=>{
+          const v=curVals[j];const cnt=curCounts[j];
+          if(!v&&!cnt)return;
+          c2.textAlign='center';c2.textBaseline='bottom';
+          // % change — topmost
+          if(pctChange[j]!==null&&prevVals[j]){
+            const chg=pctChange[j];
+            c2.font='bold 10px DM Sans,sans-serif';
+            c2.fillStyle=chg>=0?'#059669':'#dc2626';
+            c2.fillText((chg>=0?'↑':'↓')+Math.abs(chg)+'%',bar.x,bar.y-18);
+          }
+          // ASP value
+          if(v){c2.font='bold 9px DM Sans,sans-serif';c2.fillStyle='#0284c7';c2.fillText('₹'+fmtN(v),bar.x,bar.y-6);}
         });
         c2.restore();
       }}]
