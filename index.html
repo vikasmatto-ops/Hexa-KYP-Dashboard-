@@ -6,7 +6,7 @@
 <title>HexaHealth Hospital Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=25">
+<link rel="stylesheet" href="styles.css?v=26">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 </head>
 <body>
@@ -291,44 +291,49 @@
 <!-- PAGE 4: Insights -->
 <div class="page-content" id="page4">
 
-  <!-- Summary -->
   <div id="p4-summary" style="margin-bottom:14px;"></div>
 
-  <!-- Global Filters -->
-  <div class="filter-bar" style="margin-bottom:14px;">
+  <div class="filter-bar" style="margin-bottom:10px;">
     <span class="filter-bar-label">FILTERS</span>
     <div class="filter-group"><div class="filter-label">City</div><select id="p4-city" style="min-width:120px;"></select></div>
-    <div class="filter-group"><div class="filter-label">Category</div><select id="p4-category" style="min-width:130px;"></select></div>
-    <div class="filter-group"><div class="filter-label">Lap Period</div><select id="p4-compare"><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="yearly">Yearly</option></select></div>
     <button class="btn btn-outline" id="p4-clear">↺ Reset</button>
   </div>
 
-  <!-- Category Mix Cards -->
+  <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--surface2);border-radius:var(--r);">
+    <span style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-right:4px;">Categories</span>
+    <div id="p4-cat-filter" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+  </div>
+
   <div class="section-card" style="margin-bottom:14px;">
     <div class="section-header">
       <span class="section-title">Category Mix Trend</span>
-      <span class="section-sub">Share % + Avg ASP + sparkline — last 7 months</span>
+      <span class="section-sub">Share % · Avg ASP · sparkline last 7 months</span>
     </div>
-    <div id="p4-cat-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;"></div>
+    <div id="p4-cat-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:10px;"></div>
   </div>
 
-  <!-- Lap Breakdown + ASP Change side by side -->
-  <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:14px;margin-bottom:14px;">
+  <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:14px;margin-bottom:14px;">
     <div class="section-card">
-      <div class="section-header"><span class="section-title">Laparoscopy Breakdown</span></div>
+      <div class="section-header">
+        <span class="section-title">Laparoscopy Breakdown</span>
+        <div style="display:flex;gap:4px;">
+          <button class="pill" id="btn-lap-m">Monthly</button>
+          <button class="pill active" id="btn-lap-q">Quarterly</button>
+          <button class="pill" id="btn-lap-y">Yearly</button>
+        </div>
+      </div>
       <div class="chart-wrap" style="height:300px;"><canvas id="chart-lap-break"></canvas></div>
     </div>
     <div class="section-card">
       <div class="section-header">
-        <span class="section-title">ASP Comparison — 2024 vs 2025 vs 2026</span>
-        <div style="display:flex;gap:5px;">
+        <span class="section-title">ASP — 2024 vs 2025 vs 2026</span>
+        <div style="display:flex;gap:4px;">
           <button class="pill active" id="p4-asp-ytd">YTD (same months)</button>
           <button class="pill" id="p4-asp-full">Full Period</button>
         </div>
       </div>
       <div class="chart-wrap" style="height:260px;"><canvas id="chart-asp-change"></canvas></div>
-      <div id="p4-asp-change"></div>
-      <div id="p4-asp-table" style="max-height:280px;overflow-y:auto;"></div>
+      <div id="p4-asp-table" style="max-height:300px;overflow-y:auto;"></div>
     </div>
   </div>
 
@@ -356,13 +361,13 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="pincodes.js?v=25"></script>
-<script src="config.js?v=25"></script>
-<script src="data.js?v=25"></script>
-<script src="page1.js?v=25"></script>
-<script src="page2.js?v=25"></script>
-<script src="page3.js?v=25"></script>
-<script src="page4.js?v=25"></script>
+<script src="pincodes.js?v=26"></script>
+<script src="config.js?v=26"></script>
+<script src="data.js?v=26"></script>
+<script src="page1.js?v=26"></script>
+<script src="page2.js?v=26"></script>
+<script src="page3.js?v=26"></script>
+<script src="page4.js?v=26"></script>
 <script>
 window.closeModal=function(){document.getElementById('detail-overlay').classList.remove('open');document.querySelectorAll('.hospital-row.selected').forEach(r=>r.classList.remove('selected'));};
 function showPage(id){
