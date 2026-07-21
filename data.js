@@ -15,22 +15,29 @@ const DATA = {
 
 // ── CSV parser ────────────────────────────────────────────
 function parseCSV(text) {
+  console.log('[DEBUG] CSV text length:', text.length);
   const rows = [];
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    const cols = [];
-    let cur = '', inQ = false;
-    for (let j = 0; j < line.length; j++) {
-      const ch = line[j];
-      if (ch === '"') { if (inQ && line[j+1] === '"') { cur += '"'; j++; } else inQ = !inQ; }
-      else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
-      else cur += ch;
+  let cur = '', inQ = false, cols = [];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQ && text[i+1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (ch === ',' && !inQ) {
+      cols.push(cur.trim()); cur = '';
+    } else if ((ch === '\n' || ch === '\r') && !inQ) {
+      if (ch === '\r' && text[i+1] === '\n') i++; // skip \r\n
+      cols.push(cur.trim()); cur = '';
+      if (cols.some(c => c !== '')) rows.push(cols);
+      cols = [];
+    } else {
+      cur += ch;
     }
-    cols.push(cur.trim());
-    rows.push(cols);
   }
+  // Last row
+  cols.push(cur.trim());
+  if (cols.some(c => c !== '')) rows.push(cols);
+  console.log('[DEBUG] CSV parsed rows:', rows.length, '| cols in row 1:', rows[0]?.length, '| cols in last row:', rows[rows.length-1]?.length);
   return rows;
 }
 
@@ -227,10 +234,14 @@ function parseASPData(rows) {
   const idx = {};
   header.forEach((h, i) => idx[h] = i);
 
+  console.log('[DEBUG] ASP CSV rows (incl header):', rows.length);
+  console.log('[DEBUG] Header cols:', header.length, '| Hospital Name at idx:', idx['Hospital Name'], '| DOD at idx:', idx['DOD']);
+
+  let skippedNoHosp = 0, skippedBlankRow = 0;
   const cases = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    if (!r[idx['Hospital Name']] || !r[idx['Hospital Name']].trim()) continue;
+    if (!r[idx['Hospital Name']] || !r[idx['Hospital Name']].trim()) { skippedNoHosp++; continue; }
 
     const proc = normalizeProcedure(r[idx['Procedure']] || '');
 
@@ -260,6 +271,17 @@ function parseASPData(rows) {
       settlementAmount:parseAmount(r[idx['Settlement Amount']]), // Col X
     });
   }
+
+  // Debug: count July cases
+  const julCases = cases.filter(c => c.dodParsed && c.dodParsed.getMonth() === 6 && c.dodParsed.getFullYear() === 2026);
+  const julNoDod = cases.filter(c => !c.dodParsed && c.doaParsed && c.doaParsed.getMonth() === 6 && c.doaParsed.getFullYear() === 2026);
+  console.log('[DEBUG] Skipped (no Hospital Name):', skippedNoHosp);
+  console.log('[DEBUG] Total parsed cases:', cases.length);
+  console.log('[DEBUG] July by DOD:', julCases.length, '| July by DOA (no DOD):', julNoDod.length);
+  
+  // Sample 3 July cases to check date parsing
+  julCases.slice(0,3).forEach(c => console.log('[DEBUG] Sample Jul case:', c.ipdId, '| dodRaw:', c.dodRaw, '| dodParsed:', c.dodParsed));
+
   return cases;
 }
 

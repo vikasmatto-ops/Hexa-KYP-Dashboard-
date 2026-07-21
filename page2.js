@@ -3,16 +3,22 @@ const PAGE2 = (() => {
   const th={city:'',category:'',insurer:'',tpa:'',year:'',month:'',top:'10',mode:'volume'};
   let charts={},trendMode='monthly';
 
+  // Date helper: prefer DOD, fallback to DOA
+  function caseDate(c){return c.dodParsed||c.doaParsed||null;}
+
+  // Enrich all cases with _dt on load
+  function enrichDates(){DATA.aspCases.forEach(c=>{c._dt=caseDate(c);});}
+
+
   // Tier accordion open state
   const accOpen={Gold:false,Silver:false,Bronze:false,Underutilized:false};
 
-  function init(){renderFilters();initCCFilters();renderAll();bindEvents();bindCCEvents();onDataRefresh(()=>{renderFilters();initCCFilters();renderAll();});}
-
+  function init(){enrichDates();renderFilters();initCCFilters();renderAll();bindEvents();bindCCEvents();onDataRefresh(()=>{enrichDates();renderFilters();initCCFilters();renderAll();});}
   function getFiltered(){
     let cases=DATA.aspCases;
-    if(f.year)    cases=cases.filter(c=>c.doaParsed&&c.doaParsed.getFullYear()===parseInt(f.year));
-    if(f.quarter) cases=cases.filter(c=>c.doaParsed&&Math.ceil((c.doaParsed.getMonth()+1)/3)===parseInt(f.quarter));
-    if(f.month)   cases=cases.filter(c=>c.doaParsed&&String(c.doaParsed.getMonth()+1).padStart(2,'0')===f.month);
+    if(f.year)    cases=cases.filter(c=>c._dt&&c._dt.getFullYear()===parseInt(f.year));
+    if(f.quarter) cases=cases.filter(c=>c._dt&&Math.ceil((c._dt.getMonth()+1)/3)===parseInt(f.quarter));
+    if(f.month)   cases=cases.filter(c=>c._dt&&String(c._dt.getMonth()+1).padStart(2,'0')===f.month);
     if(f.city)    cases=cases.filter(c=>c.city===f.city);
     if(f.category)cases=cases.filter(c=>c.category.toLowerCase()===f.category.toLowerCase());
     if(f.insurer) cases=cases.filter(c=>c.insuranceName===f.insurer);
@@ -53,7 +59,7 @@ const PAGE2 = (() => {
   const cc={year:'',quarter:'',month:'',category:''};
 
   function initCCFilters(){
-    const yrs=[['','All Years'],...[...new Set(DATA.aspCases.map(c=>c.doaParsed&&c.doaParsed.getFullYear()).filter(Boolean))].sort().reverse().map(y=>[y,String(y)])];
+    const yrs=[['','All Years'],...[...new Set(DATA.aspCases.map(c=>c._dt&&c._dt.getFullYear()).filter(Boolean))].sort().reverse().map(y=>[y,String(y)])];
     const mos=[['','All Months'],['01','Jan'],['02','Feb'],['03','Mar'],['04','Apr'],['05','May'],['06','Jun'],['07','Jul'],['08','Aug'],['09','Sep'],['10','Oct'],['11','Nov'],['12','Dec']];
     const cats=[['','All Categories'],...CONFIG.ACTIVE_CATEGORIES.map(c=>[c,c])];
     fillSel('cc-year',yrs,'');fillSel('cc-month',mos,'');fillSel('cc-category',cats,'');
@@ -66,36 +72,35 @@ const PAGE2 = (() => {
   }
 
   function getCCPeriods(){
-    const cases=DATA.aspCases.filter(c=>c.approvalAmount!==null&&c.doaParsed);
+    const cases=DATA.aspCases.filter(c=>c.approvalAmount!==null&&c._dt);
     let curFilter,prevFilter,curLabel,prevLabel;
 
     if(cc.month&&cc.year){
       const y=parseInt(cc.year),m=parseInt(cc.month);
-      curFilter=c=>{const d=c.doaParsed;return d.getFullYear()===y&&(d.getMonth()+1)===m;};
+      curFilter=c=>{const d=c._dt;return d.getFullYear()===y&&(d.getMonth()+1)===m;};
       const pm=m===1?12:m-1,py=m===1?y-1:y;
-      prevFilter=c=>{const d=c.doaParsed;return d.getFullYear()===py&&(d.getMonth()+1)===pm;};
+      prevFilter=c=>{const d=c._dt;return d.getFullYear()===py&&(d.getMonth()+1)===pm;};
       const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       curLabel=mn[m-1]+' '+y;prevLabel=mn[pm-1]+' '+py;
     } else if(cc.quarter&&cc.year){
       const y=parseInt(cc.year),q=parseInt(cc.quarter);
-      curFilter=c=>{const d=c.doaParsed;return d.getFullYear()===y&&Math.ceil((d.getMonth()+1)/3)===q;};
+      curFilter=c=>{const d=c._dt;return d.getFullYear()===y&&Math.ceil((d.getMonth()+1)/3)===q;};
       const pq=q===1?4:q-1,py=q===1?y-1:y;
-      prevFilter=c=>{const d=c.doaParsed;return d.getFullYear()===py&&Math.ceil((d.getMonth()+1)/3)===pq;};
+      prevFilter=c=>{const d=c._dt;return d.getFullYear()===py&&Math.ceil((d.getMonth()+1)/3)===pq;};
       curLabel='Q'+q+' '+y;prevLabel='Q'+pq+' '+py;
     } else if(cc.year){
       const y=parseInt(cc.year);
-      curFilter=c=>c.doaParsed.getFullYear()===y;
-      prevFilter=c=>c.doaParsed.getFullYear()===y-1;
+      curFilter=c=>c._dt.getFullYear()===y;
+      prevFilter=c=>c._dt.getFullYear()===y-1;
       curLabel=String(y);prevLabel=String(y-1);
     } else {
-      // Auto-detect latest month
       let maxD=null;
-      cases.forEach(c=>{if(!maxD||c.doaParsed>maxD)maxD=c.doaParsed;});
+      cases.forEach(c=>{if(!maxD||c._dt>maxD)maxD=c._dt;});
       if(!maxD)return{curCases:[],prevCases:[],curLabel:'—',prevLabel:'—'};
       const y=maxD.getFullYear(),m=maxD.getMonth()+1;
-      curFilter=c=>{const d=c.doaParsed;return d.getFullYear()===y&&(d.getMonth()+1)===m;};
+      curFilter=c=>{const d=c._dt;return d.getFullYear()===y&&(d.getMonth()+1)===m;};
       const pm=m===1?12:m-1,py=m===1?y-1:y;
-      prevFilter=c=>{const d=c.doaParsed;return d.getFullYear()===py&&(d.getMonth()+1)===pm;};
+      prevFilter=c=>{const d=c._dt;return d.getFullYear()===py&&(d.getMonth()+1)===pm;};
       const mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       curLabel=mn[m-1]+' '+y;prevLabel=mn[pm-1]+' '+py;
     }
@@ -110,7 +115,6 @@ const PAGE2 = (() => {
     const ctx=document.getElementById('chart-city-cat');if(!ctx)return;
     const{curCases,prevCases,curLabel,prevLabel}=getCCPeriods();
 
-    // Period label
     const plEl=document.getElementById('cc-period-label');
     if(plEl)plEl.textContent=curCases.length?curLabel+' vs '+prevLabel:'No data for selected period';
 
@@ -119,7 +123,6 @@ const PAGE2 = (() => {
       return;
     }
 
-    // Aggregate by city
     const allCities=new Set();
     const curByCity={},prevByCity={};
     curCases.forEach(c=>{allCities.add(c.city);if(!curByCity[c.city])curByCity[c.city]=[];curByCity[c.city].push(c.approvalAmount);});
@@ -131,7 +134,6 @@ const PAGE2 = (() => {
     const pctChange=curVals.map((v,i)=>prevVals[i]?Math.round(((v-prevVals[i])/prevVals[i])*100):0);
     const cityLabels=cities.map(c=>cityLabel(c));
 
-    // Legend
     const legEl=document.getElementById('cc-legend');
     if(legEl)legEl.innerHTML=`
       <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:2px;background:#cbd5e1;display:inline-block;"></span>${esc(prevLabel)}</span>
@@ -143,21 +145,23 @@ const PAGE2 = (() => {
     ]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:36,right:10}},plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': ₹'+fmtN(c.raw),afterBody:items=>{const idx=items[0].dataIndex;const chg=pctChange[idx];return 'Change: '+(chg>=0?'+':'')+chg+'%';}}}},scales:{x:{ticks:{font:{size:10},maxRotation:35},grid:{display:false}},y:{ticks:{font:{size:10},callback:v=>'₹'+fmtN(v)},grid:{color:'#f0f0f0'},beginAtZero:false}},animation:{onComplete:function(){const chart=this;const c2=chart.ctx;c2.save();const meta=chart.getDatasetMeta(1);meta.data.forEach((bar,j)=>{const v=curVals[j];if(!v)return;c2.font='bold 9px DM Sans,sans-serif';c2.textAlign='center';c2.textBaseline='bottom';c2.fillStyle='#0284c7';c2.fillText('₹'+fmtN(v),bar.x,bar.y-16);const chg=pctChange[j];if(prevVals[j]){const arrow=chg>=0?'↑':'↓';c2.fillStyle=chg>=0?'#059669':'#dc2626';c2.font='bold 10px DM Sans,sans-serif';c2.fillText(arrow+Math.abs(chg)+'%',bar.x,bar.y-4);}});c2.restore();}}}});
   }
 
-  // ASP Trend with 2 lines: Avg ASP + Cases
+  // ASP Trend — 2 lines: Avg ASP + Cases (BUG FIX: count ALL cases with valid DOA, not just those with approval amount)
   function renderTrend(cases){
-    const validCases=cases.filter(c=>c.approvalAmount!==null&&c.doaParsed);
+    const allWithDate=cases.filter(c=>c._dt);
     const grouped={};
-    validCases.forEach(c=>{
-      const d=c.doaParsed;let key;
+    allWithDate.forEach(c=>{
+      const d=c._dt;let key;
       if(trendMode==='yearly')key=`${d.getFullYear()}`;
       else if(trendMode==='quarterly')key=`${d.getFullYear()} Q${Math.ceil((d.getMonth()+1)/3)}`;
       else key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      if(!grouped[key])grouped[key]=[];grouped[key].push(c.approvalAmount);
+      if(!grouped[key])grouped[key]={amounts:[],total:0};
+      grouped[key].total++;
+      if(c.approvalAmount!==null)grouped[key].amounts.push(c.approvalAmount);
     });
     const sorted=Object.entries(grouped).sort(([a],[b])=>a.localeCompare(b));
     const labels=sorted.map(([k])=>{if(trendMode==='yearly'||trendMode==='quarterly')return k;const[yr,mo]=k.split('-');return['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+mo-1]+'\''+yr.slice(2);});
-    const avgData=sorted.map(([,v])=>Math.round(v.reduce((s,x)=>s+x,0)/v.length));
-    const counts=sorted.map(([,v])=>v.length);
+    const avgData=sorted.map(([,v])=>v.amounts.length?Math.round(v.amounts.reduce((s,x)=>s+x,0)/v.amounts.length):0);
+    const counts=sorted.map(([,v])=>v.total);
     destroyChart('trend');
     const ctx=document.getElementById('chart-trend');if(!ctx)return;
     charts.trend=new Chart(ctx,{type:'line',data:{labels,datasets:[
@@ -256,8 +260,8 @@ const PAGE2 = (() => {
     if(th.category)cases=cases.filter(c=>c.category.toLowerCase()===th.category.toLowerCase());
     if(th.insurer) cases=cases.filter(c=>c.insuranceName===th.insurer);
     if(th.tpa)     cases=cases.filter(c=>c.tpaName===th.tpa);
-    if(th.year)    cases=cases.filter(c=>c.doaParsed&&c.doaParsed.getFullYear()===parseInt(th.year));
-    if(th.month)   cases=cases.filter(c=>c.doaParsed&&String(c.doaParsed.getMonth()+1).padStart(2,'0')===th.month);
+    if(th.year)    cases=cases.filter(c=>c._dt&&c._dt.getFullYear()===parseInt(th.year));
+    if(th.month)   cases=cases.filter(c=>c._dt&&String(c._dt.getMonth()+1).padStart(2,'0')===th.month);
     const topN=parseInt(th.top)||10;
     // Aggregate per HOSPITAL (not combinations)
     const byHosp={};
@@ -403,7 +407,7 @@ const PAGE2 = (() => {
     const tpas=[['','All TPAs'],...getTPAs().map(t=>[t,t])];
     fillSel('comp-city',cities,'');fillSel('comp-insurer',insurers,'');fillSel('comp-tpa',tpas,'');
     fillSel('comp-cat',cats,'');fillSel('comp-proc',[['','All Procedures'],...getProceduresForCategory('').map(p=>[p,p])],'');
-    const thYrs=[['','All Years'],...[...new Set(DATA.aspCases.map(c=>c.doaParsed&&c.doaParsed.getFullYear()).filter(Boolean))].sort().map(y=>[y,String(y)])];
+    const thYrs=[['','All Years'],...[...new Set(DATA.aspCases.map(c=>c._dt&&c._dt.getFullYear()).filter(Boolean))].sort().map(y=>[y,String(y)])];
     const thMos=[['','All Months'],['01','Jan'],['02','Feb'],['03','Mar'],['04','Apr'],['05','May'],['06','Jun'],['07','Jul'],['08','Aug'],['09','Sep'],['10','Oct'],['11','Nov'],['12','Dec']];
     fillSel('th-year',thYrs,'');fillSel('th-month',thMos,'');
     fillSel('th-city',cities,'');fillSel('th-category',cats,'');fillSel('th-insurer',insurers,'');fillSel('th-tpa',tpas,'');
@@ -453,7 +457,7 @@ const PAGE2 = (() => {
   }
 
   function renderFilters(){
-    const yrs=[['','All Years'],...[...new Set(DATA.aspCases.map(c=>c.doaParsed&&c.doaParsed.getFullYear()).filter(Boolean))].sort().reverse().map(y=>[y,String(y)])];
+    const yrs=[['','All Years'],...[...new Set(DATA.aspCases.map(c=>c._dt&&c._dt.getFullYear()).filter(Boolean))].sort().reverse().map(y=>[y,String(y)])];
     const mos=[['','All Months'],['01','January'],['02','February'],['03','March'],['04','April'],['05','May'],['06','June'],['07','July'],['08','August'],['09','September'],['10','October'],['11','November'],['12','December']];
     fillSel('p2-year',yrs,f.year);fillSel('p2-month',mos,f.month);
     fillSel('p2-city',[['','All Cities'],...getCities().map(c=>[c,cityLabel(c)])],f.city);

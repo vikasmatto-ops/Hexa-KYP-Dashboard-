@@ -6,7 +6,7 @@
 <title>HexaHealth — Hospital Network (View Only)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=19">
+<link rel="stylesheet" href="styles.css?v=23">
 </head>
 <body>
 <div class="layout">
@@ -44,7 +44,6 @@
 </div>
 
 <div class="page-content active" id="page1">
-
   <div class="view-toggle">
     <button class="vtab active" id="vtab-table" onclick="PAGE1.switchView('table')">🏥 Table View</button>
     <button class="vtab" id="vtab-smart" onclick="PAGE1.switchView('smart')">🔍 Smart Finder</button>
@@ -118,21 +117,19 @@
       <div style="font-size:15px;font-weight:700;margin-bottom:4px;">📍 Nearest Hospital Finder</div>
       <div style="font-size:12px;color:var(--text3);margin-bottom:12px;">Find nearest active hospitals by patient pincode</div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:12px;">
-        <div class="filter-group"><div class="filter-label">Patient Pincode</div><input type="text" id="sf-pincode" placeholder="" maxlength="6" style="width:110px;font-family:var(--mono);font-size:14px;letter-spacing:1.2px;"></div>
-        <div class="filter-group"><div class="filter-label">Insurer (optional)</div><select id="sf-near-insurer" style="min-width:170px;"></select></div>
-        <div class="filter-group"><div class="filter-label">TPA (optional)</div><select id="sf-near-tpa" style="min-width:160px;"></select></div>
-        <button class="btn btn-teal" id="sf-nearest-go">📍 Find Nearest</button>
+        <div class="filter-group"><div class="filter-label">Patient Pincode</div><input type="text" id="sf-pincode" placeholder="e.g. 500084" maxlength="6" style="width:150px;"></div>
+        <div class="filter-group"><div class="filter-label">Insurer (optional)</div><select id="sf-ins-dist" style="min-width:160px;"></select></div>
+        <div class="filter-group"><div class="filter-label">TPA (optional)</div><select id="sf-tpa-dist" style="min-width:150px;"></select></div>
+        <button class="btn btn-teal" id="sf-find">📍 Find Nearest</button>
       </div>
-      <div id="sf-near-results"></div>
+      <div id="sf-dist-results"></div>
     </div>
   </div>
-
 </div>
 
 </div>
 </div>
 
-<!-- CENTER MODAL -->
 <div id="detail-overlay" onclick="if(event.target===this)window.closeModal()">
   <div id="detail-panel">
     <div class="dp-header">
@@ -149,10 +146,10 @@
 <div class="loading-overlay" id="loading-overlay"><div class="spinner"></div><span>Loading hospital data…</span></div>
 <div class="live-toast" id="live-toast" style="display:none;"><div class="live-toast-dot"></div><span id="live-toast-text"></span><span style="cursor:pointer;margin-left:6px;opacity:.5;" onclick="this.parentElement.style.display='none'">✕</span></div>
 
-<script src="pincodes.js?v=19"></script>
-<script src="config.js?v=19"></script>
-<script src="data.js?v=19"></script>
-<script src="page1.js?v=19"></script>
+<script src="pincodes.js?v=23"></script>
+<script src="config.js?v=23"></script>
+<script src="data.js?v=23"></script>
+<script src="page1.js?v=23"></script>
 <script>
 window.closeModal=function(){document.getElementById('detail-overlay').classList.remove('open');document.querySelectorAll('.hospital-row.selected').forEach(r=>r.classList.remove('selected'));};
 function updateLiveInfo(){
@@ -173,37 +170,21 @@ function updateLiveInfo(){
     document.getElementById('refresh-btn')?.addEventListener('click', async () => {
       const icon = document.getElementById('refresh-icon');
       if(icon) icon.classList.add('spinning');
-      try {
-        await forceRefresh();
-        showToast('✓ Data refreshed');
-      } catch(e) {
-        console.error('Refresh failed:',e);
-        showToast('⚠ Refresh failed');
-      } finally {
-        if(icon) icon.classList.remove('spinning');
-      }
+      try { await forceRefresh(); showToast('✓ Data refreshed'); }
+      catch(e) { console.error('Refresh failed:',e); showToast('⚠ Refresh failed'); }
+      finally { if(icon) icon.classList.remove('spinning'); }
     });
     document.querySelectorAll('.sb-item').forEach(item => {
-      item.addEventListener('click', () => {
-        if(window.innerWidth <= 900) {
-          document.querySelector('.sidebar')?.classList.remove('mobile-open');
-        }
-      });
+      item.addEventListener('click', () => { if(window.innerWidth <= 900) document.querySelector('.sidebar')?.classList.remove('mobile-open'); });
     });
   }catch(err){
     document.getElementById('loading-overlay').innerHTML='<span style="color:red">⚠ Failed to load data. Refresh page.</span>';
     console.error(err);
   }
 })();
-
 function showToast(msg){
-  const t = document.getElementById('live-toast');
-  const txt = document.getElementById('live-toast-text');
-  if(t && txt){
-    txt.textContent = msg;
-    t.style.display = 'flex';
-    setTimeout(()=>{ t.style.display = 'none'; }, 3000);
-  }
+  const t=document.getElementById('live-toast'),txt=document.getElementById('live-toast-text');
+  if(t&&txt){txt.textContent=msg;t.style.display='flex';setTimeout(()=>{t.style.display='none';},3000);}
 }
 </script>
 </body>
