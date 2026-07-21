@@ -1,8 +1,13 @@
 // ============================================================
-// PAGE 4 — INSIGHTS v3
+// PAGE 4 — INSIGHTS v4: Focused "Why is ASP dropping" analysis
 // ============================================================
 const PAGE4 = (() => {
   const RELEVANT_CATS = ['UROLOGY','PROCTOLOGY','LAPAROSCOPY','AESTHETICS / PLASTIC SURGERY','KIDNEY STONE','VASCULAR'];
+  const CAT_MAP = {
+    'UROLOGY':'UROLOGY','PROCTOLOGY':'PROCTOLOGY','LAPAROSCOPY':'LAPAROSCOPY',
+    'AESTHETICS / PLASTIC SURGERY':'AESTHETICS / PLASTIC SURGERY',
+    'KIDNEY STONE':'KIDNEY STONE','VASCULAR':'VASCULAR'
+  };
   const CAT_COLORS = {
     'UROLOGY':'#0ea5e9','PROCTOLOGY':'#10b981','LAPAROSCOPY':'#8b5cf6',
     'AESTHETICS / PLASTIC SURGERY':'#f97316','KIDNEY STONE':'#eab308',
@@ -14,517 +19,398 @@ const PAGE4 = (() => {
     'VASCULAR':'Vascular','OTHERS':'Others'
   };
   const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
   let charts = {};
-  let lapMode = 'quarterly';
-  let aspView = 'ytd';
-  let selectedCats = [...RELEVANT_CATS, 'OTHERS']; // multi-select state
-  let f = { city: '' };
+  let selectedCats = [...RELEVANT_CATS, 'OTHERS'];
+  let selectedCities = []; // empty = all
 
   // ── Helpers ──────────────────────────────────────────────
   function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
-  function fmtASP(n){if(!n&&n!==0)return'—';if(n>=100000)return'₹'+(n/100000).toFixed(2)+'L';if(n>=1000)return'₹'+Math.round(n).toLocaleString('en-IN');return'₹'+Math.round(n);}
+  function fmtASP(n){if(!n&&n!==0)return'—';const a=Math.abs(n);if(a>=100000)return(n<0?'-':'')+'₹'+(a/100000).toFixed(2)+'L';if(a>=1000)return(n<0?'-':'')+'₹'+Math.round(a).toLocaleString('en-IN');return(n<0?'-':'')+'₹'+Math.round(a);}
+  function fmtN(n){if(!n&&n!==0)return'—';if(n>=100000)return(n/100000).toFixed(1)+'L';if(n>=1000)return Math.round(n).toLocaleString('en-IN');return Math.round(n).toString();}
   function avg(arr){return arr.length?arr.reduce((s,v)=>s+v,0)/arr.length:0;}
+  function sum(arr){return arr.reduce((s,v)=>s+v,0);}
   function destroyChart(k){if(charts[k]){try{charts[k].destroy();}catch(e){}delete charts[k];}}
   function cityLabel(c){return CONFIG.CITY_DISPLAY[c]||c.charAt(0).toUpperCase()+c.slice(1);}
   function caseDate(c){return c.dodParsed||c.doaParsed||null;}
   function catColor(cat){return CAT_COLORS[(cat||'').toUpperCase()]||'#94a3b8';}
-  const CAT_MAP = {
-    'UROLOGY':'UROLOGY','PROCTOLOGY':'PROCTOLOGY','LAPAROSCOPY':'LAPAROSCOPY',
-    'AESTHETICS / PLASTIC SURGERY':'AESTHETICS / PLASTIC SURGERY',
-    'KIDNEY STONE':'KIDNEY STONE','VASCULAR':'VASCULAR'
-  };
+  function normCat(cat){const u=(cat||'').trim().toUpperCase();return CAT_MAP[u]||'OTHERS';}
+  function fmtMonth(ym){const[yr,mo]=ym.split('-');return MN[+mo-1]+"'"+yr.slice(2);}
 
-  function normCat(cat){
-    const u=(cat||'').trim().toUpperCase();
-    return CAT_MAP[u]||'OTHERS';
-  }
-
-  // ── Get cases, normalise category, apply filters ─────────
+  // ── Get all cases enriched ─────────────────────────────
   function getAllCases(){
     return DATA.aspCases.filter(c=>{
       const dt=caseDate(c);
       if(!dt||c.approvalAmount===null)return false;
-      if(f.city&&c.city!==f.city)return false;
+      if(selectedCities.length>0&&!selectedCities.includes(c.city))return false;
+      const cat=normCat(c.category);
+      if(!selectedCats.includes(cat))return false;
       return true;
     }).map(c=>{
       const dt=caseDate(c);
-      const cat=normCat(c.category);
-      return{...c,dt,cat,ym:`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`,
-        yr:String(dt.getFullYear()),mo:dt.getMonth()+1,
-        qtr:`${dt.getFullYear()} Q${Math.ceil((dt.getMonth()+1)/3)}`};
-    }).filter(c=>selectedCats.includes(c.cat));
-  }
-
-  function classifyLap(proc){
-    const p=(proc||'').toLowerCase();
-    if(p.includes('balloon')||p.includes('intragastric'))return'Balloon';
-    if(p.includes('sleeve'))return'Sleeve';
-    if(p.includes('cholecystectomy')||p.includes('chole'))return'Cholecystectomy';
-    return'Other Hernia/Lap';
+      return{...c,dt,cat:normCat(c.category),ym:`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`,yr:dt.getFullYear(),mo:dt.getMonth()+1};
+    });
   }
 
   // ═══════════════════════════════════════════════════════
-  // MULTI-SELECT CATEGORY FILTER
+  // 1. HEADLINE — the story in one banner
   // ═══════════════════════════════════════════════════════
-  function renderCatFilter(){
-    const el=document.getElementById('p4-cat-filter');if(!el)return;
-    const allCats=[...RELEVANT_CATS,'OTHERS'];
-    el.innerHTML=allCats.map(cat=>`
-      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;padding:4px 10px;border-radius:20px;border:1.5px solid ${selectedCats.includes(cat)?catColor(cat):'var(--border)'};background:${selectedCats.includes(cat)?catColor(cat)+'18':'transparent'};font-size:11px;font-weight:600;white-space:nowrap;transition:all .15s;">
-        <input type="checkbox" value="${cat}" ${selectedCats.includes(cat)?'checked':''} style="display:none;" onchange="PAGE4._toggleCat('${cat}')">
-        <span style="width:7px;height:7px;border-radius:50%;background:${catColor(cat)};display:inline-block;"></span>
-        ${esc(CAT_SHORT[cat]||cat)}
-      </label>`).join('');
-  }
-
-  function _toggleCat(cat){
-    if(selectedCats.includes(cat)){
-      if(selectedCats.length===1)return; // must keep at least one
-      selectedCats=selectedCats.filter(c=>c!==cat);
-    } else {
-      selectedCats=[...selectedCats,cat];
-    }
-    renderCatFilter();
-    renderAll();
-  }
-
-  // ═══════════════════════════════════════════════════════
-  // 1. SUMMARY CARDS
-  // ═══════════════════════════════════════════════════════
-  function renderSummary(){
-    const el=document.getElementById('p4-summary');if(!el)return;
+  function renderHeadline(){
+    const el=document.getElementById('p4-headline');if(!el)return;
     const cases=getAllCases();
     if(!cases.length){el.innerHTML='';return;}
+
     const months=[...new Set(cases.map(c=>c.ym))].sort();
     if(months.length<2){el.innerHTML='';return;}
-    const cur=months[months.length-1],prev=months[months.length-2];
-    const curC=cases.filter(c=>c.ym===cur),prevC=cases.filter(c=>c.ym===prev);
-    const curASP=avg(curC.map(c=>c.approvalAmount)),prevASP=avg(prevC.map(c=>c.approvalAmount));
-    const aspChg=prevASP?((curASP-prevASP)/prevASP*100):0;
-    const volChg=prevC.length?((curC.length-prevC.length)/prevC.length*100):0;
-    const [cyr,cmo]=cur.split('-'),curLabel=MN[+cmo-1]+"'"+cyr.slice(2);
-    const [pyr,pmo]=prev.split('-'),prevLabel=MN[+pmo-1]+"'"+pyr.slice(2);
+    const firstYm=months[0],lastYm=months[months.length-1];
+    const firstCases=cases.filter(c=>c.ym===firstYm),lastCases=cases.filter(c=>c.ym===lastYm);
 
-    const catShare=(arr)=>{const tot=arr.length||1;const m={};arr.forEach(c=>{m[c.cat]=(m[c.cat]||0)+1;});return Object.fromEntries(Object.entries(m).map(([k,v])=>[k,v/tot*100]));};
-    const cs=catShare(curC),ps=catShare(prevC);
-    const allCats=[...new Set([...Object.keys(cs),...Object.keys(ps)])];
-    let topGainer=null,topLoser=null,maxG=-999,maxL=999;
-    allCats.forEach(cat=>{const diff=(cs[cat]||0)-(ps[cat]||0);if(diff>maxG){maxG=diff;topGainer={cat,diff,cur:cs[cat]||0,prev:ps[cat]||0};}if(diff<maxL){maxL=diff;topLoser={cat,diff,cur:cs[cat]||0,prev:ps[cat]||0};}});
+    const firstASP=avg(firstCases.map(c=>c.approvalAmount));
+    const lastASP=avg(lastCases.map(c=>c.approvalAmount));
+    const aspChg=firstASP?((lastASP-firstASP)/firstASP*100):0;
+    const volChg=firstCases.length?((lastCases.length-firstCases.length)/firstCases.length*100):0;
 
-    const curBal=curC.filter(c=>c.cat==='LAPAROSCOPY'&&classifyLap(c.procedureRaw)==='Balloon').length;
-    const prevBal=prevC.filter(c=>c.cat==='LAPAROSCOPY'&&classifyLap(c.procedureRaw)==='Balloon').length;
-    const curSlv=curC.filter(c=>c.cat==='LAPAROSCOPY'&&classifyLap(c.procedureRaw)==='Sleeve').length;
-    const prevSlv=prevC.filter(c=>c.cat==='LAPAROSCOPY'&&classifyLap(c.procedureRaw)==='Sleeve').length;
+    // Find biggest volume driver
+    const catGrowth={};
+    RELEVANT_CATS.concat('OTHERS').forEach(cat=>{
+      const f=firstCases.filter(c=>c.cat===cat).length;
+      const l=lastCases.filter(c=>c.cat===cat).length;
+      catGrowth[cat]={first:f,last:l,delta:l-f};
+    });
+    const topDriver=Object.entries(catGrowth).filter(([c])=>selectedCats.includes(c)).sort((a,b)=>b[1].delta-a[1].delta)[0];
+    const topDriverPct=topDriver?Math.round(topDriver[1].first?((topDriver[1].last-topDriver[1].first)/topDriver[1].first*100):0):0;
 
-    el.innerHTML=`
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;">
-      <div style="background:var(--surface2);border-radius:var(--r);padding:14px;border-left:4px solid ${aspChg<0?'#ef4444':'#10b981'};">
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;">📊 Avg ASP (${curLabel})</div>
-        <div style="font-size:22px;font-weight:800;color:var(--text);margin:4px 0;">${fmtASP(Math.round(curASP))}</div>
-        <div style="font-size:12px;color:${aspChg<0?'#ef4444':'#10b981'};font-weight:600;">${aspChg>=0?'▲':'▼'} ${Math.abs(aspChg).toFixed(1)}% vs ${prevLabel}</div>
+    // Mix contribution: what would ASP be if mix stayed the same?
+    let syntheticASP=0;
+    let totalWeight=0;
+    RELEVANT_CATS.concat('OTHERS').forEach(cat=>{
+      if(!selectedCats.includes(cat))return;
+      const firstShare=firstCases.length?firstCases.filter(c=>c.cat===cat).length/firstCases.length:0;
+      const lastCatASP=avg(lastCases.filter(c=>c.cat===cat).map(c=>c.approvalAmount));
+      if(firstShare&&lastCatASP){syntheticASP+=firstShare*lastCatASP;totalWeight+=firstShare;}
+    });
+    if(totalWeight>0)syntheticASP/=totalWeight;
+    const mixImpact=syntheticASP-lastASP;
+
+    el.innerHTML=`<div style="background:linear-gradient(135deg,#0c4a6e,#0ea5e9);border-radius:var(--r);padding:22px 26px;color:#fff;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;opacity:.85;margin-bottom:8px;">📊 Insight Summary · ${fmtMonth(firstYm)} → ${fmtMonth(lastYm)}</div>
+      <div style="font-size:17px;font-weight:600;line-height:1.55;margin-bottom:14px;">
+        Cases grew <strong>${volChg>=0?'+':''}${volChg.toFixed(0)}%</strong> (${firstCases.length} → ${lastCases.length}). 
+        Avg ASP <strong style="color:${aspChg<0?'#fca5a5':'#86efac'};">${aspChg>=0?'rose':'fell'} ${Math.abs(aspChg).toFixed(1)}%</strong> (${fmtASP(Math.round(firstASP))} → ${fmtASP(Math.round(lastASP))}).
       </div>
-      <div style="background:var(--surface2);border-radius:var(--r);padding:14px;border-left:4px solid #0ea5e9;">
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;">📈 Cases (${curLabel})</div>
-        <div style="font-size:22px;font-weight:800;color:var(--text);margin:4px 0;">${curC.length}</div>
-        <div style="font-size:12px;color:${volChg>=0?'#10b981':'#ef4444'};font-weight:600;">${volChg>=0?'▲':'▼'} ${Math.abs(volChg).toFixed(1)}% vs ${prevLabel}</div>
-      </div>
-      ${topGainer?`<div style="background:var(--surface2);border-radius:var(--r);padding:14px;border-left:4px solid #f97316;">
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;">🔺 Fastest Growing</div>
-        <div style="font-size:15px;font-weight:800;color:var(--text);margin:4px 0;">${esc(CAT_SHORT[topGainer.cat]||topGainer.cat)}</div>
-        <div style="font-size:12px;color:var(--text2);">${topGainer.prev.toFixed(1)}% → <strong>${topGainer.cur.toFixed(1)}%</strong> share</div>
-      </div>`:''}
-      ${topLoser?`<div style="background:var(--surface2);border-radius:var(--r);padding:14px;border-left:4px solid #8b5cf6;">
-        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;">🔻 Biggest Decline</div>
-        <div style="font-size:15px;font-weight:800;color:var(--text);margin:4px 0;">${esc(CAT_SHORT[topLoser.cat]||topLoser.cat)}</div>
-        <div style="font-size:12px;color:var(--text2);">${topLoser.prev.toFixed(1)}% → <strong>${topLoser.cur.toFixed(1)}%</strong> share</div>
-      </div>`:''}
-    </div>
-    <div style="background:linear-gradient(135deg,#f0f9ff,#e0f2fe);border-radius:var(--r);padding:12px 16px;border:1px solid #bae6fd;">
-      <div style="font-size:12px;font-weight:700;color:#0c4a6e;margin-bottom:4px;">📋 Key Insight — ${curLabel}</div>
-      <div style="font-size:12px;color:#0c4a6e;line-height:1.7;">
-        ASP <strong>${aspChg<0?'fell':'rose'} ${Math.abs(aspChg).toFixed(1)}%</strong> from ${prevLabel} (${fmtASP(Math.round(prevASP))}) to ${curLabel} (${fmtASP(Math.round(curASP))}).
-        ${topGainer?.cat==='UROLOGY'?` Urology now represents <strong>${topGainer.cur.toFixed(0)}%</strong> of all cases (avg ASP ~₹38-42K), displacing higher-value categories.`:''}
-        ${(curBal<prevBal||curSlv<prevSlv)?` Bariatric cases dropped — Balloon <strong>${prevBal}→${curBal}</strong>, Sleeve <strong>${prevSlv}→${curSlv}</strong> (avg ASP ₹3-4.5L each).`:''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
+        ${topDriver?`<div style="background:rgba(255,255,255,.14);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:10px;opacity:.75;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;">Top Volume Driver</div>
+          <div style="font-size:17px;font-weight:800;">${esc(CAT_SHORT[topDriver[0]])}</div>
+          <div style="font-size:12px;opacity:.85;">+${topDriverPct}% cases (${topDriver[1].first} → ${topDriver[1].last})</div>
+        </div>`:''}
+        <div style="background:rgba(255,255,255,.14);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:10px;opacity:.75;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;">If Mix Stayed Constant</div>
+          <div style="font-size:17px;font-weight:800;">${fmtASP(Math.round(syntheticASP))}</div>
+          <div style="font-size:12px;opacity:.85;">Actual: ${fmtASP(Math.round(lastASP))} · Mix cost: ${fmtASP(Math.round(mixImpact))}</div>
+        </div>
+        <div style="background:rgba(255,255,255,.14);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:10px;opacity:.75;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;">Verdict</div>
+          <div style="font-size:14px;font-weight:700;line-height:1.4;">${aspChg<0?'Mix shift toward lower-ASP categories is dragging the average down.':'ASP holding up despite volume growth.'}</div>
+        </div>
       </div>
     </div>`;
   }
 
   // ═══════════════════════════════════════════════════════
-  // 2. CATEGORY MIX — Cards with trend arrow + dual comparison
+  // 2. THE KEY CHART: stacked category volume + ASP line
   // ═══════════════════════════════════════════════════════
-  let mixMode = 'monthly'; // monthly | quarterly | yearly | mtd | ytd
+  function renderKeyChart(){
+    destroyChart('key');
+    const ctx=document.getElementById('chart-key');if(!ctx)return;
+    const cases=getAllCases();
+    if(!cases.length)return;
 
-  function getPeriodCases(mode){
-    // Returns {cur, prev, lyPrev, curLabel, prevLabel, lyLabel}
-    // cur = current period, prev = previous period, lyPrev = same period last year
-    const all = DATA.aspCases.filter(c=>{
-      const dt=caseDate(c);
-      return dt && c.approvalAmount!==null && (!f.city||c.city===f.city) && selectedCats.includes(normCat(c.category));
-    }).map(c=>{const dt=caseDate(c);return{...c,dt,cat:normCat(c.category),ym:`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`,mo:dt.getMonth()+1,yr:dt.getFullYear(),qtr:Math.ceil((dt.getMonth()+1)/3)};});
+    const months=[...new Set(cases.map(c=>c.ym))].sort();
+    const cats=[...RELEVANT_CATS,'OTHERS'].filter(c=>selectedCats.includes(c));
 
-    const now = new Date();
-    const curYr = now.getFullYear(), curMo = now.getMonth()+1, curDay = now.getDate();
+    // Stacked case counts per category per month
+    const datasets=cats.map(cat=>({
+      type:'bar',label:CAT_SHORT[cat]||cat,
+      data:months.map(m=>cases.filter(c=>c.ym===m&&c.cat===cat).length),
+      backgroundColor:catColor(cat),
+      borderRadius:0,
+      maxBarThickness:36,
+      stack:'cases',order:2,
+      yAxisID:'y'
+    }));
 
-    // Find latest data month
-    const months=[...new Set(all.map(c=>c.ym))].sort();
-    const latestYm=months[months.length-1];
-    if(!latestYm)return{cur:[],prev:[],lyPrev:[],curLabel:'—',prevLabel:'—',lyLabel:'—'};
-    const [lyr,lmo]=[parseInt(latestYm.split('-')[0]),parseInt(latestYm.split('-')[1])];
-
-    let curF,prevF,lyF,curLabel,prevLabel,lyLabel;
-
-    if(mode==='monthly'){
-      curF=c=>c.yr===lyr&&c.mo===lmo;
-      const pm=lmo===1?12:lmo-1,py=lmo===1?lyr-1:lyr;
-      prevF=c=>c.yr===py&&c.mo===pm;
-      lyF=c=>c.yr===lyr-1&&c.mo===lmo;
-      curLabel=MN[lmo-1]+"'"+String(lyr).slice(2);
-      prevLabel=MN[pm-1]+"'"+(lmo===1?String(lyr-1):String(lyr)).slice(2);
-      lyLabel=MN[lmo-1]+"'"+String(lyr-1).slice(2);
-    } else if(mode==='quarterly'){
-      const cq=Math.ceil(lmo/3);
-      curF=c=>c.yr===lyr&&c.qtr===cq;
-      const pq=cq===1?4:cq-1,py=cq===1?lyr-1:lyr;
-      prevF=c=>c.yr===py&&c.qtr===pq;
-      lyF=c=>c.yr===lyr-1&&c.qtr===cq;
-      curLabel=`Q${cq} '${String(lyr).slice(2)}`;
-      prevLabel=`Q${pq} '${String(py).slice(2)}`;
-      lyLabel=`Q${cq} '${String(lyr-1).slice(2)}`;
-    } else if(mode==='yearly'){
-      curF=c=>c.yr===lyr;
-      prevF=c=>c.yr===lyr-1;
-      lyF=c=>c.yr===lyr-2;
-      curLabel=String(lyr);prevLabel=String(lyr-1);lyLabel=String(lyr-2);
-    } else if(mode==='mtd'){
-      curF=c=>c.yr===lyr&&c.mo===lmo&&c.dt.getDate()<=curDay;
-      const pm=lmo===1?12:lmo-1,py=lmo===1?lyr-1:lyr;
-      prevF=c=>c.yr===py&&c.mo===pm&&c.dt.getDate()<=curDay;
-      lyF=c=>c.yr===lyr-1&&c.mo===lmo&&c.dt.getDate()<=curDay;
-      curLabel='MTD '+MN[lmo-1];prevLabel='MTD '+MN[pm-1];lyLabel='MTD '+MN[lmo-1]+' LY';
-    } else { // ytd
-      curF=c=>c.yr===lyr&&(c.mo<lmo||(c.mo===lmo));
-      prevF=c=>c.yr===lyr-1&&(c.mo<lmo||(c.mo===lmo));
-      lyF=c=>c.yr===lyr-2&&(c.mo<lmo||(c.mo===lmo));
-      curLabel=`YTD '${String(lyr).slice(2)}`;prevLabel=`YTD '${String(lyr-1).slice(2)}`;lyLabel=`YTD '${String(lyr-2).slice(2)}`;
-    }
-
-    return{cur:all.filter(curF),prev:all.filter(prevF),lyPrev:all.filter(lyF),curLabel,prevLabel,lyLabel};
-  }
-
-  function trendArrow(vals){
-    // vals = array of last 3 period values (oldest first)
-    if(vals.length<2)return{arrow:'→',color:'#94a3b8'};
-    const last=vals[vals.length-1],first=vals[0];
-    const chg=first?((last-first)/first*100):0;
-    if(chg>10)return{arrow:'↑',color:'#10b981'};
-    if(chg>3)return{arrow:'↗',color:'#10b981'};
-    if(chg>-3)return{arrow:'→',color:'#94a3b8'};
-    if(chg>-10)return{arrow:'↘',color:'#ef4444'};
-    return{arrow:'↓',color:'#ef4444'};
-  }
-
-  function renderCategoryMix(){
-    const el=document.getElementById('p4-cat-grid');if(!el)return;
-
-    // Render mode toggle buttons
-    const toggleEl=document.getElementById('p4-mix-toggle');
-    if(toggleEl){
-      const modes=[['monthly','Monthly'],['quarterly','Quarterly'],['yearly','Yearly'],['mtd','MTD'],['ytd','YTD']];
-      toggleEl.innerHTML=modes.map(([m,l])=>`<button onclick="PAGE4._setMixMode('${m}')" style="padding:3px 10px;border-radius:20px;border:1.5px solid ${mixMode===m?'#0ea5e9':'var(--border)'};background:${mixMode===m?'#e0f2fe':'transparent'};font-size:11px;font-weight:${mixMode===m?'600':'400'};cursor:pointer;color:${mixMode===m?'#0369a1':'var(--text-secondary)'};">${l}</button>`).join('');
-    }
-
-    const {cur,prev,lyPrev,curLabel,prevLabel,lyLabel}=getPeriodCases(mixMode);
-    if(!cur.length){el.innerHTML='<div style="color:var(--text-secondary);padding:14px;">No data for selected period.</div>';return;}
-
-    const cats=[...new Set([...cur,...prev,...lyPrev].map(c=>c.cat))];
-    const curTotal=cur.length||1,prevTotal=prev.length||1,lyTotal=lyPrev.length||1;
-
-    // For trend arrow: get last 3 periods' share for each cat
-    const allMs=[...new Set(DATA.aspCases.filter(c=>caseDate(c)).map(c=>{const d=caseDate(c);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;}))].sort().slice(-4);
-
-    const catData=cats.map(cat=>{
-      const cc=cur.filter(c=>c.cat===cat);
-      const pc=prev.filter(c=>c.cat===cat);
-      const lc=lyPrev.filter(c=>c.cat===cat);
-
-      const curShare=cc.length/curTotal*100;
-      const prevShare=pc.length/prevTotal*100;
-      const lyShare=lc.length/lyTotal*100;
-      const curASP=avg(cc.map(c=>c.approvalAmount));
-      const prevASP=avg(pc.map(c=>c.approvalAmount));
-      const lyASP=avg(lc.map(c=>c.approvalAmount));
-
-      // Trend: share change direction over last 3 months
-      const trendVals=allMs.map(ym=>{
-        const mo=DATA.aspCases.filter(c=>{const d=caseDate(c);return d&&`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`===ym;});
-        const catMo=mo.filter(c=>normCat(c.category)===cat);
-        return mo.length?catMo.length/mo.length*100:0;
-      });
-      const {arrow,color:arrowColor}=trendArrow(trendVals);
-
-      // Change calcs
-      const shareChgPrev=curShare-prevShare;
-      const aspChgPrev=prevASP?((curASP-prevASP)/prevASP*100):0;
-      const caseChgPrev=cc.length-pc.length;
-      const casePctPrev=pc.length?((cc.length-pc.length)/pc.length*100):0;
-
-      const shareChgLy=curShare-lyShare;
-      const aspChgLy=lyASP?((curASP-lyASP)/lyASP*100):0;
-      const caseChgLy=cc.length-lc.length;
-      const casePctLy=lc.length?((cc.length-lc.length)/lc.length*100):0;
-
-      return{cat,curShare,curASP,curCases:cc.length,arrow,arrowColor,
-        shareChgPrev,aspChgPrev,caseChgPrev,casePctPrev,
-        shareChgLy,aspChgLy,caseChgLy,casePctLy,prevLabel,lyLabel,total:cc.length};
-    }).sort((a,b)=>b.total-a.total);
-
-    function fmtChg(v,isAsp){
-      const sign=v>=0?'+':'';
-      if(isAsp)return sign+(v>=0?'+':'')+fmtASP(Math.abs(Math.round(v)));
-      return sign+v.toFixed(1)+'%';
-    }
-    function chgColor(v){return v>0?'#10b981':v<0?'#ef4444':'#94a3b8';}
-    function rowHtml(shareChg,aspChg,caseChg,label){
-      function fmt(v,isAsp){
-        const sign=v>0?'↑':v<0?'↓':'→';
-        const color=v>0?'#10b981':v<0?'#ef4444':'#94a3b8';
-        let val;
-        if(isAsp){const abs=Math.abs(Math.round(v/1000));val=abs>=1?abs+'K':Math.abs(Math.round(v)).toLocaleString('en-IN');}
-        else val=Math.abs(v).toFixed(1)+'%';
-        return`<span style="color:${color};font-weight:600;white-space:nowrap;">${sign}${isAsp?'₹':''}${val}</span>`;
-      }
-      const cColor=caseChg>0?'#10b981':caseChg<0?'#ef4444':'#94a3b8';
-      const cSign=caseChg>0?'↑':caseChg<0?'↓':'→';
-      return`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--border);flex-wrap:wrap;">
-        <span style="font-size:11px;color:var(--text2);min-width:170px;flex-shrink:0;">${label}</span>
-        ${fmt(shareChg,false)}
-        ${fmt(aspChg,true)}
-        <span style="color:${cColor};font-weight:600;white-space:nowrap;">${cSign}${Math.abs(caseChg)} cases</span>
-      </div>`;
-    }
-
-    el.innerHTML=catData.map(d=>`
-      <div style="background:var(--surface2);border-radius:var(--r);padding:14px;border-top:3px solid ${catColor(d.cat)};">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-          <span style="font-size:12px;font-weight:700;color:var(--text);">${esc(CAT_SHORT[d.cat]||d.cat)}</span>
-          <span style="font-size:22px;line-height:1;color:${d.arrowColor};">${d.arrow}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:12px;">
-          <div>
-            <div style="font-size:28px;font-weight:800;color:${catColor(d.cat)};line-height:1;">${d.curShare.toFixed(1)}%</div>
-            <div style="font-size:10px;color:var(--text3);margin-top:2px;">share of cases</div>
-          </div>
-          <div style="text-align:right;">
-            <div style="font-size:14px;font-weight:700;color:var(--text);">${fmtASP(Math.round(d.curASP))}</div>
-            <div style="font-size:13px;font-weight:600;color:var(--text2);">${d.curCases} cases</div>
-          </div>
-        </div>
-        <div style="border-top:1.5px solid var(--border);padding-top:8px;">
-          ${rowHtml(d.shareChgPrev,d.aspChgPrev,d.caseChgPrev,'vs last period ('+d.prevLabel+')')}
-          ${rowHtml(d.shareChgLy,d.aspChgLy,d.caseChgLy,'vs same period last yr ('+d.lyLabel+')')}
-        </div>
-      </div>`).join('');
-  }
-
-  function _setMixMode(mode){mixMode=mode;renderCategoryMix();}
-
-
-  // ═══════════════════════════════════════════════════════
-  // 3. LAPAROSCOPY BREAKDOWN — quarterly default, labels
-  // ═══════════════════════════════════════════════════════
-  function renderLapBreakdown(){
-    destroyChart('lapBreak');
-    const ctx=document.getElementById('chart-lap-break');if(!ctx)return;
-    const lap=DATA.aspCases.filter(c=>{
-      const dt=caseDate(c);
-      return dt&&c.approvalAmount!==null&&c.category.toUpperCase()==='LAPAROSCOPY'&&(!f.city||c.city===f.city);
-    }).map(c=>{
-      const dt=caseDate(c);
-      return{...c,dt,ym:`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`,qtr:`${dt.getFullYear()} Q${Math.ceil((dt.getMonth()+1)/3)}`,yr:String(dt.getFullYear())};
-    });
-    if(!lap.length){ctx.parentElement.innerHTML='<div style="color:var(--text3);font-size:13px;padding:14px;">No laparoscopy data.</div>';return;}
-
-    const getPk=c=>lapMode==='yearly'?c.yr:lapMode==='quarterly'?c.qtr:c.ym;
-    const fmtPk=k=>{if(lapMode!=='monthly')return k;const[yr,mo]=k.split('-');return MN[+mo-1]+"'"+yr.slice(2);};
-    const periods=[...new Set(lap.map(getPk))].sort();
-    const subs=['Balloon','Sleeve','Cholecystectomy','Other Hernia/Lap'];
-    const subColors=['#0ea5e9','#8b5cf6','#10b981','#94a3b8'];
-    const byP={};
-    lap.forEach(c=>{const pk=getPk(c);const sub=classifyLap(c.procedureRaw);if(!byP[pk])byP[pk]={};if(!byP[pk][sub])byP[pk][sub]={n:0,amt:[]};byP[pk][sub].n++;byP[pk][sub].amt.push(c.approvalAmount);});
-
-    // Only show labels if periods <= 12 to avoid clutter
-    const showLabels=periods.length<=12;
-
-    charts.lapBreak=new Chart(ctx,{type:'bar',
-      data:{labels:periods.map(fmtPk),datasets:subs.map((sub,i)=>({
-        label:sub,data:periods.map(p=>byP[p]?.[sub]?.n||0),
-        backgroundColor:subColors[i]+'cc',borderColor:subColors[i],borderWidth:1,borderRadius:3,maxBarThickness:28
-      }))},
-      options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:showLabels?22:8}},interaction:{mode:'index',intersect:false},
-        plugins:{legend:{display:true,position:'bottom',labels:{boxWidth:10,font:{size:10}}},
-          tooltip:{callbacks:{afterLabel:c=>{const pd=byP[periods[c.dataIndex]]?.[subs[c.datasetIndex]];return pd&&pd.amt.length?'Avg ASP: '+fmtASP(Math.round(avg(pd.amt))):'';}}}},
-        scales:{x:{stacked:true,ticks:{font:{size:9},maxRotation:45},grid:{display:false}},
-          y:{stacked:true,ticks:{font:{size:10},stepSize:5},grid:{color:'#f0f0f0'},beginAtZero:true,title:{display:true,text:'Cases',font:{size:11}}}}},
-      plugins:[{id:'lapLbls',afterDatasetsDraw(chart){
-        if(!showLabels)return;
-        const ctx2=chart.ctx;
-        // Only label the top segment of each stacked bar (total)
-        const totals=periods.map(p=>subs.reduce((s,sub)=>s+(byP[p]?.[sub]?.n||0),0));
-        chart.getDatasetMeta(subs.length-1).data.forEach((bar,j)=>{
-          const v=totals[j];if(!v)return;
-          ctx2.save();ctx2.font='bold 9px DM Sans,sans-serif';ctx2.fillStyle='#334155';
-          ctx2.textAlign='center';ctx2.textBaseline='bottom';ctx2.fillText(v,bar.x,bar.y-4);ctx2.restore();
-        });
-      }}]
-    });
-  }
-
-  // ═══════════════════════════════════════════════════════
-  // 4. ASP COMPARISON — 2024 vs 2025 vs 2026
-  // ═══════════════════════════════════════════════════════
-  function renderASPChange(){
-    destroyChart('aspChange');
-    const ctx=document.getElementById('chart-asp-change');if(!ctx)return;
-    const allC=getAllCases();
-    const years=['2024','2025','2026'];
-    const yearColors={'2024':'#94a3b8','2025':'#0ea5e9','2026':'#10b981'};
-
-    // Detect actual data range
-    const mo2024=[...new Set(allC.filter(c=>c.yr==='2024').map(c=>c.mo))].sort((a,b)=>a-b);
-    const mo2025=[...new Set(allC.filter(c=>c.yr==='2025').map(c=>c.mo))].sort((a,b)=>a-b);
-    const mo2026=[...new Set(allC.filter(c=>c.yr==='2026').map(c=>c.mo))].sort((a,b)=>a-b);
-    const latestMo2026=mo2026[mo2026.length-1]||7;
-    const firstMo2024=mo2024[0]||4; // April
-
-    // YTD: same months across years — use Apr-latestMo2026 for 2024, same for others
-    // Full: each year's actual range
-    const getRange=(yr)=>{
-      if(aspView==='ytd'){
-        // Common window: Apr to latestMo2026 (since 2024 only has Apr+)
-        return Array.from({length:latestMo2026-firstMo2024+1},(_,i)=>i+firstMo2024);
-      }
-      if(yr==='2024')return mo2024;
-      if(yr==='2025')return mo2025;
-      return mo2026;
+    // Overlay line: avg ASP per month
+    const aspLine={
+      type:'line',label:'Avg ASP',
+      data:months.map(m=>{const mc=cases.filter(c=>c.ym===m);return mc.length?Math.round(avg(mc.map(c=>c.approvalAmount))):null;}),
+      borderColor:'#0f172a',backgroundColor:'transparent',borderWidth:2.5,pointRadius:4,
+      pointBackgroundColor:'#0f172a',tension:.3,fill:false,yAxisID:'y1',order:1
     };
 
-    // X-axis: month labels (Apr...Jul for YTD, Jan...Dec for full)
-    const xRange=getRange('2026');
-    const xLabels=xRange.map(m=>MN[m-1]);
-
-    const datasets=years.filter(yr=>{
-      // Only include 2024 if it has data
-      if(yr==='2024')return mo2024.length>0;
-      return true;
-    }).map(yr=>{
-      const range=getRange(yr);
-      const data=xRange.map(xMo=>{
-        // For YTD: map by position. For full: map by same month number
-        const targetMo=aspView==='ytd'?xMo:xMo;
-        if(!range.includes(targetMo))return null;
-        const yrC=allC.filter(c=>c.yr===yr&&c.mo===targetMo);
-        return yrC.length>=3?Math.round(avg(yrC.map(c=>c.approvalAmount))):null;
-      });
-      return{label:yr,data,borderColor:yearColors[yr],backgroundColor:yearColors[yr]+(yr==='2026'?'18':'00'),borderWidth:2.5,pointRadius:5,pointBackgroundColor:yearColors[yr],tension:.3,fill:yr==='2026',spanGaps:false};
-    });
-
-    // Compute y-axis range
-    const allVals=datasets.flatMap(d=>d.data.filter(v=>v!==null));
-    const minV=allVals.length?Math.min(...allVals):0;
-    const maxV=allVals.length?Math.max(...allVals):100000;
-    const pad=(maxV-minV)*0.15||10000;
-
-    charts.aspChange=new Chart(ctx,{type:'line',
-      data:{labels:xLabels,datasets},
-      options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:28}},interaction:{mode:'index',intersect:false},
-        plugins:{legend:{display:true,position:'bottom',labels:{boxWidth:10,font:{size:11}}},
-          tooltip:{callbacks:{label:c=>c.dataset.label+': '+(c.raw?fmtASP(c.raw):'No data')}}},
+    charts.key=new Chart(ctx,{data:{labels:months.map(fmtMonth),datasets:[...datasets,aspLine]},
+      options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:16,right:12}},
+        interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:true,position:'bottom',labels:{boxWidth:10,font:{size:10}}},
+          tooltip:{callbacks:{label:c=>c.dataset.label==='Avg ASP'?'Avg ASP: '+fmtASP(c.raw):c.dataset.label+': '+c.raw+' cases'}}},
         scales:{
-          x:{ticks:{font:{size:10}},grid:{display:false},title:{display:true,text:aspView==='ytd'?`Month (${MN[firstMo2024-1]}–${MN[latestMo2026-1]}) — same window across years`:'All months',font:{size:10}}},
-          y:{min:Math.round((minV-pad)/5000)*5000,max:Math.round((maxV+pad)/5000)*5000,
-            ticks:{font:{size:10},callback:v=>fmtASP(v)},grid:{color:'#f0f0f0'},
-            title:{display:true,text:'Avg ASP',font:{size:11}}}}},
-      plugins:[{id:'aspLbls',afterDatasetsDraw(chart){
-        chart.data.datasets.forEach((ds,di)=>{
-          chart.getDatasetMeta(di).data.forEach((pt,j)=>{
-            const v=ds.data[j];if(!v)return;
-            const ctx2=chart.ctx;ctx2.save();
-            ctx2.font='bold 9px DM Sans,sans-serif';ctx2.fillStyle=ds.borderColor;
-            ctx2.textAlign='center';ctx2.textBaseline='bottom';
-            ctx2.fillText(fmtASP(v).replace('₹',''),pt.x,pt.y-7);ctx2.restore();
-          });
-        });
-      }}]
+          x:{stacked:true,ticks:{font:{size:9},maxRotation:45},grid:{display:false}},
+          y:{stacked:true,position:'left',ticks:{font:{size:10}},grid:{color:'#f0f0f0'},title:{display:true,text:'Case count (stacked)',font:{size:11}}},
+          y1:{position:'right',ticks:{font:{size:10},callback:v=>fmtASP(v),color:'#0f172a'},grid:{display:false},title:{display:true,text:'Avg ASP',font:{size:11}}}
+        }
+      }
     });
-
-    // Category comparison table
-    const tblEl=document.getElementById('p4-asp-table');if(!tblEl)return;
-    const yrCols=years.filter(yr=>yr!=='2024'||mo2024.length>0);
-    const cats=[...new Set(allC.map(c=>c.cat))].sort((a,b)=>{
-      return allC.filter(c=>c.cat===b).length-allC.filter(c=>c.cat===a).length;
-    });
-
-    tblEl.innerHTML=`<div style="font-size:11px;color:var(--text3);margin:10px 0 6px;font-weight:600;">CATEGORY BREAKDOWN — ${aspView==='ytd'?`YTD ${MN[firstMo2024-1]}–${MN[latestMo2026-1]}`:' Full period'}</div>
-    <table style="width:100%;font-size:11px;border-collapse:collapse;">
-      <thead><tr style="background:var(--surface2);">
-        <th style="text-align:left;padding:6px 8px;">Category</th>
-        ${yrCols.map(yr=>`<th style="text-align:right;padding:6px 8px;">Cases '${yr.slice(2)}</th><th style="text-align:right;padding:6px 8px;">Avg ASP '${yr.slice(2)}</th>`).join('')}
-        <th style="text-align:right;padding:6px 8px;color:#0ea5e9;">ASP Δ '25→'26</th>
-        <th style="text-align:right;padding:6px 8px;color:#f97316;">Share Δ '25→'26</th>
-      </tr></thead>
-      <tbody>${cats.map(cat=>{
-        const yrD=yrCols.map(yr=>{
-          const range=getRange(yr);
-          const yc=allC.filter(c=>c.cat===cat&&c.yr===yr&&range.includes(c.mo));
-          const allYC=allC.filter(c=>c.yr===yr&&range.includes(c.mo));
-          return{n:yc.length,asp:yc.length?Math.round(avg(yc.map(c=>c.approvalAmount))):0,share:allYC.length?yc.length/allYC.length*100:0};
-        });
-        const d25=yrD[yrCols.indexOf('2025')]||{asp:0,share:0};
-        const d26=yrD[yrCols.indexOf('2026')]||{asp:0,share:0};
-        const aspChg=d25.asp?((d26.asp-d25.asp)/d25.asp*100):0;
-        const shChg=d26.share-d25.share;
-        return`<tr style="border-bottom:1px solid var(--border);">
-          <td style="padding:5px 8px;font-weight:600;"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${catColor(cat)};margin-right:5px;vertical-align:middle;"></span>${esc(CAT_SHORT[cat]||cat)}</td>
-          ${yrD.map(d=>`<td style="text-align:right;padding:5px 8px;">${d.n||'—'}</td><td style="text-align:right;padding:5px 8px;font-weight:600;">${d.asp?fmtASP(d.asp):'—'}</td>`).join('')}
-          <td style="text-align:right;padding:5px 8px;font-weight:700;color:${aspChg>2?'#10b981':aspChg<-2?'#ef4444':'var(--text2)'};">${d25.asp&&d26.asp?(aspChg>=0?'+':'')+aspChg.toFixed(1)+'%':'—'}</td>
-          <td style="text-align:right;padding:5px 8px;font-weight:700;color:${shChg>0.5?'#f97316':shChg<-0.5?'#8b5cf6':'var(--text2)'};">${d25.share&&d26.share?(shChg>=0?'+':'')+shChg.toFixed(1)+'%':'—'}</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table>`;
   }
 
   // ═══════════════════════════════════════════════════════
-  // RENDER ALL + EVENTS
+  // 3. GROWTH MATRIX — table with heatmap coloring
   // ═══════════════════════════════════════════════════════
-  function renderAll(){renderSummary();renderCategoryMix();renderLapBreakdown();renderASPChange();}
+  function renderGrowthMatrix(){
+    const el=document.getElementById('p4-matrix');if(!el)return;
+    const cases=getAllCases();
+    if(!cases.length){el.innerHTML='';return;}
 
+    const months=[...new Set(cases.map(c=>c.ym))].sort();
+    const firstYm=months[0],lastYm=months[months.length-1];
+    const cats=[...RELEVANT_CATS,'OTHERS'].filter(c=>selectedCats.includes(c));
+
+    const rows=cats.map(cat=>{
+      const first=cases.filter(c=>c.ym===firstYm&&c.cat===cat);
+      const last=cases.filter(c=>c.ym===lastYm&&c.cat===cat);
+      const firstCount=first.length,lastCount=last.length;
+      const firstASP=avg(first.map(c=>c.approvalAmount));
+      const lastASP=avg(last.map(c=>c.approvalAmount));
+      const growth=firstCount?((lastCount-firstCount)/firstCount*100):(lastCount?100:0);
+      const aspChg=firstASP?((lastASP-firstASP)/firstASP*100):0;
+
+      let verdict='';let vColor='var(--text2)';
+      if(growth>100&&aspChg>-5){verdict='Volume driver';vColor='#0ea5e9';}
+      else if(growth<20&&aspChg<-5){verdict='Both declining';vColor='#ef4444';}
+      else if(growth<20&&aspChg>0){verdict='Flat volume';vColor='#f97316';}
+      else if(growth>50&&aspChg>0){verdict='Healthy growth';vColor='#10b981';}
+      else if(growth<0||aspChg<-10){verdict='Concern';vColor='#ef4444';}
+      else{verdict='Stable';vColor='var(--text2)';}
+
+      return{cat,firstCount,lastCount,firstASP:Math.round(firstASP),lastASP:Math.round(lastASP),growth,aspChg,verdict,vColor};
+    }).sort((a,b)=>b.lastCount-a.lastCount);
+
+    el.innerHTML=`<div style="overflow-x:auto;">
+      <table style="width:100%;font-size:12px;border-collapse:collapse;">
+        <thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border);">
+          <th style="text-align:left;padding:9px 10px;font-weight:700;">Category</th>
+          <th style="text-align:right;padding:9px 10px;font-weight:700;">Cases ${fmtMonth(firstYm)}</th>
+          <th style="text-align:right;padding:9px 10px;font-weight:700;">Cases ${fmtMonth(lastYm)}</th>
+          <th style="text-align:right;padding:9px 10px;font-weight:700;">Volume Growth</th>
+          <th style="text-align:right;padding:9px 10px;font-weight:700;">ASP ${fmtMonth(firstYm)}</th>
+          <th style="text-align:right;padding:9px 10px;font-weight:700;">ASP ${fmtMonth(lastYm)}</th>
+          <th style="text-align:right;padding:9px 10px;font-weight:700;">ASP Change</th>
+          <th style="text-align:left;padding:9px 10px;font-weight:700;">Verdict</th>
+        </tr></thead>
+        <tbody>${rows.map(r=>{
+          const gColor=r.growth>50?'#10b981':r.growth>10?'#84cc16':r.growth>-10?'var(--text2)':'#ef4444';
+          const aColor=r.aspChg>2?'#10b981':r.aspChg>-2?'var(--text2)':'#ef4444';
+          return`<tr style="border-bottom:1px solid var(--border);">
+            <td style="padding:8px 10px;font-weight:600;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${catColor(r.cat)};margin-right:6px;"></span>${esc(CAT_SHORT[r.cat]||r.cat)}</td>
+            <td style="text-align:right;padding:8px 10px;color:var(--text2);">${r.firstCount}</td>
+            <td style="text-align:right;padding:8px 10px;font-weight:700;">${r.lastCount}</td>
+            <td style="text-align:right;padding:8px 10px;font-weight:700;color:${gColor};">${r.growth>=0?'+':''}${r.growth.toFixed(0)}%</td>
+            <td style="text-align:right;padding:8px 10px;color:var(--text2);">${r.firstASP?fmtASP(r.firstASP):'—'}</td>
+            <td style="text-align:right;padding:8px 10px;font-weight:700;">${r.lastASP?fmtASP(r.lastASP):'—'}</td>
+            <td style="text-align:right;padding:8px 10px;font-weight:700;color:${aColor};">${r.firstASP&&r.lastASP?(r.aspChg>=0?'+':'')+r.aspChg.toFixed(1)+'%':'—'}</td>
+            <td style="padding:8px 10px;"><span style="background:${r.vColor}22;color:${r.vColor};padding:2px 9px;border-radius:12px;font-weight:600;font-size:11px;">${r.verdict}</span></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 4. ASP DECOMPOSITION — the math
+  // ═══════════════════════════════════════════════════════
+  function renderDecomposition(){
+    const el=document.getElementById('p4-decomp');if(!el)return;
+    const cases=getAllCases();
+    if(!cases.length){el.innerHTML='';return;}
+
+    const months=[...new Set(cases.map(c=>c.ym))].sort();
+    const firstYm=months[0],lastYm=months[months.length-1];
+    const firstCases=cases.filter(c=>c.ym===firstYm),lastCases=cases.filter(c=>c.ym===lastYm);
+    const firstASP=avg(firstCases.map(c=>c.approvalAmount));
+    const lastASP=avg(lastCases.map(c=>c.approvalAmount));
+    const totalChg=lastASP-firstASP;
+
+    // Decompose: per category contribution
+    const cats=[...RELEVANT_CATS,'OTHERS'].filter(c=>selectedCats.includes(c));
+    const contribs=cats.map(cat=>{
+      const fCases=firstCases.filter(c=>c.cat===cat);
+      const lCases=lastCases.filter(c=>c.cat===cat);
+      const fShare=firstCases.length?fCases.length/firstCases.length:0;
+      const lShare=lastCases.length?lCases.length/lastCases.length:0;
+      const fASP=avg(fCases.map(c=>c.approvalAmount));
+      const lASP=avg(lCases.map(c=>c.approvalAmount));
+      // Mix effect: (lShare - fShare) * ((fASP+lASP)/2)
+      const mixEffect=(lShare-fShare)*((fASP+lASP)/2);
+      // Rate effect: fShare * (lASP - fASP)  -- weighted by original share
+      const rateEffect=fShare*(lASP-fASP);
+      return{cat,mixEffect,rateEffect,fShare:fShare*100,lShare:lShare*100,fASP:Math.round(fASP),lASP:Math.round(lASP)};
+    });
+
+    const totalMix=sum(contribs.map(c=>c.mixEffect));
+    const totalRate=sum(contribs.map(c=>c.rateEffect));
+
+    el.innerHTML=`
+      <div style="background:var(--surface2);border-radius:var(--r);padding:16px 18px;">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px;">Why did ASP change from ${fmtASP(Math.round(firstASP))} to ${fmtASP(Math.round(lastASP))}?</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px;">
+          <div style="background:${totalMix<0?'#fef2f2':'#f0fdf4'};border-left:3px solid ${totalMix<0?'#ef4444':'#10b981'};border-radius:0 6px 6px 0;padding:10px 12px;">
+            <div style="font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;">Mix Effect</div>
+            <div style="font-size:20px;font-weight:800;color:${totalMix<0?'#ef4444':'#10b981'};">${totalMix>=0?'+':''}${fmtASP(Math.round(totalMix))}</div>
+            <div style="font-size:11px;color:var(--text2);">Case composition shifted</div>
+          </div>
+          <div style="background:${totalRate<0?'#fef2f2':'#f0fdf4'};border-left:3px solid ${totalRate<0?'#ef4444':'#10b981'};border-radius:0 6px 6px 0;padding:10px 12px;">
+            <div style="font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;">Rate Effect</div>
+            <div style="font-size:20px;font-weight:800;color:${totalRate<0?'#ef4444':'#10b981'};">${totalRate>=0?'+':''}${fmtASP(Math.round(totalRate))}</div>
+            <div style="font-size:11px;color:var(--text2);">Per-category ASP changed</div>
+          </div>
+          <div style="background:#f8fafc;border-left:3px solid #64748b;border-radius:0 6px 6px 0;padding:10px 12px;">
+            <div style="font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;">Total Change</div>
+            <div style="font-size:20px;font-weight:800;color:${totalChg<0?'#ef4444':'#10b981'};">${totalChg>=0?'+':''}${fmtASP(Math.round(totalChg))}</div>
+            <div style="font-size:11px;color:var(--text2);">${totalMix<0&&totalRate>0?'Mix shift dominating':totalMix>0&&totalRate<0?'Rate decline dominating':'Both moving together'}</div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--text2);line-height:1.7;padding:10px 12px;background:#f8fafc;border-radius:6px;">
+          <strong>How to read this:</strong> Mix effect = ASP change from cases shifting between categories.
+          Rate effect = ASP change from each category getting paid differently.
+          ${Math.abs(totalMix)>Math.abs(totalRate)?'Since <strong>mix effect is bigger</strong>, the problem is WHAT cases you\'re doing, not HOW MUCH you\'re getting paid per case.':'Since <strong>rate effect is bigger</strong>, the problem is per-case pricing/approvals, not case mix.'}
+        </div>
+      </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 5. CATEGORY DEEP DIVE — sparkline strip per category
+  // ═══════════════════════════════════════════════════════
+  function renderCategoryStrip(){
+    const el=document.getElementById('p4-cat-strip');if(!el)return;
+    const cases=getAllCases();
+    if(!cases.length){el.innerHTML='';return;}
+
+    const months=[...new Set(cases.map(c=>c.ym))].sort();
+    const cats=[...RELEVANT_CATS,'OTHERS'].filter(c=>selectedCats.includes(c));
+
+    const catData=cats.map(cat=>{
+      const monthly=months.map(m=>{
+        const mc=cases.filter(c=>c.ym===m&&c.cat===cat);
+        return{ym:m,count:mc.length,asp:mc.length?Math.round(avg(mc.map(c=>c.approvalAmount))):0};
+      });
+      const totalCases=sum(monthly.map(m=>m.count));
+      return{cat,monthly,totalCases};
+    }).sort((a,b)=>b.totalCases-a.totalCases);
+
+    function drawSpark(vals,color,fmt){
+      const w=180,h=40;
+      const max=Math.max(...vals,1);
+      const min=Math.min(...vals,0);
+      const range=max-min||1;
+      const pts=vals.map((v,i)=>`${i*(w/(vals.length-1||1))},${h-(v-min)/range*(h-6)-3}`).join(' ');
+      const dots=vals.map((v,i)=>{
+        const x=i*(w/(vals.length-1||1)),y=h-(v-min)/range*(h-6)-3;
+        return`<circle cx="${x}" cy="${y}" r="2" fill="${color}"/>`;
+      }).join('');
+      // Only label first, middle, last
+      const iFirst=0,iLast=vals.length-1,iMid=Math.floor(vals.length/2);
+      const labels=[iFirst,iMid,iLast].filter((v,i,a)=>a.indexOf(v)===i&&v<vals.length).map(i=>{
+        const x=i*(w/(vals.length-1||1)),y=h-(vals[i]-min)/range*(h-6)-6;
+        return`<text x="${x}" y="${y}" text-anchor="middle" font-size="8" fill="${color}" font-weight="700">${fmt(vals[i])}</text>`;
+      }).join('');
+      return`<svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:${h}px;">
+        <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+        ${dots}${labels}
+      </svg>`;
+    }
+
+    el.innerHTML=catData.map(d=>{
+      const color=catColor(d.cat);
+      const firstCount=d.monthly[0].count,lastCount=d.monthly[d.monthly.length-1].count;
+      const firstASP=d.monthly.filter(m=>m.asp)[0]?.asp||0;
+      const lastASP=d.monthly[d.monthly.length-1].asp||0;
+      const growthPct=firstCount?((lastCount-firstCount)/firstCount*100):0;
+      const aspPct=firstASP?((lastASP-firstASP)/firstASP*100):0;
+      return`<div style="background:var(--surface2);border-radius:var(--r);padding:12px 14px;display:grid;grid-template-columns:150px 1fr 1fr;gap:16px;align-items:center;border-left:3px solid ${color};">
+        <div>
+          <div style="font-size:12px;font-weight:800;color:var(--text);">${esc(CAT_SHORT[d.cat]||d.cat)}</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:2px;">${d.totalCases} total cases</div>
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-bottom:2px;">
+            <span>Cases: ${firstCount} → <strong style="color:${growthPct>=0?'#10b981':'#ef4444'};">${lastCount}</strong></span>
+            <span style="color:${growthPct>=0?'#10b981':'#ef4444'};font-weight:700;">${growthPct>=0?'+':''}${growthPct.toFixed(0)}%</span>
+          </div>
+          ${drawSpark(d.monthly.map(m=>m.count),color,v=>v)}
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-bottom:2px;">
+            <span>ASP: ${fmtASP(firstASP)} → <strong style="color:${aspPct>=0?'#10b981':'#ef4444'};">${fmtASP(lastASP)}</strong></span>
+            <span style="color:${aspPct>=0?'#10b981':'#ef4444'};font-weight:700;">${aspPct>=0?'+':''}${aspPct.toFixed(1)}%</span>
+          </div>
+          ${drawSpark(d.monthly.map(m=>m.asp).filter(v=>v>0),color,v=>fmtASP(v).replace('₹',''))}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // FILTERS
+  // ═══════════════════════════════════════════════════════
   function renderFilters(){
-    const cities=[['','All Cities'],...getCities().map(c=>[c,cityLabel(c)])];
-    const el=document.getElementById('p4-city');
-    if(el)el.innerHTML=cities.map(([v,l])=>`<option value="${esc(v)}"${v===f.city?' selected':''}>${esc(l)}</option>`).join('');
+    // Category pills
+    const catEl=document.getElementById('p4-cat-filter');
+    if(catEl){
+      const allCats=[...RELEVANT_CATS,'OTHERS'];
+      catEl.innerHTML=allCats.map(cat=>{
+        const active=selectedCats.includes(cat);
+        return`<button onclick="PAGE4._toggleCat('${cat}')" style="padding:5px 12px;border-radius:20px;border:1.5px solid ${active?catColor(cat):'var(--border)'};background:${active?catColor(cat)+'18':'transparent'};font-size:11px;font-weight:600;cursor:pointer;color:${active?catColor(cat):'var(--text2)'};white-space:nowrap;display:inline-flex;align-items:center;gap:5px;">
+          <span style="width:6px;height:6px;border-radius:50%;background:${catColor(cat)};"></span>
+          ${esc(CAT_SHORT[cat]||cat)}
+        </button>`;
+      }).join('');
+    }
+    // City pills
+    const cityEl=document.getElementById('p4-city-filter');
+    if(cityEl){
+      const cities=getCities();
+      cityEl.innerHTML=cities.map(city=>{
+        const active=selectedCities.includes(city);
+        return`<button onclick="PAGE4._toggleCity('${city}')" style="padding:5px 12px;border-radius:20px;border:1.5px solid ${active?'#0ea5e9':'var(--border)'};background:${active?'#e0f2fe':'transparent'};font-size:11px;font-weight:600;cursor:pointer;color:${active?'#0369a1':'var(--text2)'};white-space:nowrap;">
+          ${esc(cityLabel(city))}
+        </button>`;
+      }).join('');
+    }
   }
 
-  function bindEvents(){
-    document.getElementById('p4-city')?.addEventListener('change',e=>{f.city=e.target.value;renderAll();});
-    document.getElementById('p4-clear')?.addEventListener('click',()=>{
-      f.city='';selectedCats=[...RELEVANT_CATS,'OTHERS'];lapMode='quarterly';aspView='ytd';
-      renderFilters();renderCatFilter();
-      document.getElementById('btn-lap-q')?.classList.add('active');
-      document.getElementById('btn-lap-m')?.classList.remove('active');
-      document.getElementById('btn-lap-y')?.classList.remove('active');
-      document.getElementById('p4-asp-ytd')?.classList.add('active');
-      document.getElementById('p4-asp-full')?.classList.remove('active');
-      renderAll();
-    });
-    document.getElementById('btn-lap-m')?.addEventListener('click',()=>{lapMode='monthly';setLapBtn('btn-lap-m');renderLapBreakdown();});
-    document.getElementById('btn-lap-q')?.addEventListener('click',()=>{lapMode='quarterly';setLapBtn('btn-lap-q');renderLapBreakdown();});
-    document.getElementById('btn-lap-y')?.addEventListener('click',()=>{lapMode='yearly';setLapBtn('btn-lap-y');renderLapBreakdown();});
-    document.getElementById('p4-asp-ytd')?.addEventListener('click',()=>{aspView='ytd';document.getElementById('p4-asp-ytd').classList.add('active');document.getElementById('p4-asp-full').classList.remove('active');renderASPChange();});
-    document.getElementById('p4-asp-full')?.addEventListener('click',()=>{aspView='full';document.getElementById('p4-asp-full').classList.add('active');document.getElementById('p4-asp-ytd').classList.remove('active');renderASPChange();});
+  function _toggleCat(cat){
+    if(selectedCats.includes(cat)){if(selectedCats.length===1)return;selectedCats=selectedCats.filter(c=>c!==cat);}
+    else{selectedCats=[...selectedCats,cat];}
+    renderFilters();renderAll();
+  }
+  function _toggleCity(city){
+    if(selectedCities.includes(city))selectedCities=selectedCities.filter(c=>c!==city);
+    else selectedCities=[...selectedCities,city];
+    renderFilters();renderAll();
+  }
+  function _resetFilters(){
+    selectedCats=[...RELEVANT_CATS,'OTHERS'];
+    selectedCities=[];
+    renderFilters();renderAll();
   }
 
-  function setLapBtn(activeId){['btn-lap-m','btn-lap-q','btn-lap-y'].forEach(id=>{document.getElementById(id)?.classList.toggle('active',id===activeId);});}
-
-  function init(){renderFilters();renderCatFilter();renderAll();bindEvents();onDataRefresh(()=>{renderFilters();renderCatFilter();renderAll();});}
-  return{init,_toggleCat,_setMixMode};
+  // ═══════════════════════════════════════════════════════
+  function renderAll(){
+    renderHeadline();
+    renderKeyChart();
+    renderDecomposition();
+    renderGrowthMatrix();
+    renderCategoryStrip();
+  }
+  function init(){renderFilters();renderAll();onDataRefresh(()=>{renderFilters();renderAll();});}
+  return{init,_toggleCat,_toggleCity,_resetFilters};
 })();
