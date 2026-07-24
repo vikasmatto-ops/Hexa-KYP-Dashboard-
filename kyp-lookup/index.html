@@ -273,7 +273,7 @@ function buildCombined() {
 }
 
 function populateFilters() {
-  const years = [...new Set(combinedRows.map(r => r.year).filter(y => y))].sort((a,b) => b-a);
+  const years = [...new Set(combinedRows.map(r => r.year).filter(y => y >= 2020 && y <= 2026))].sort((a,b) => b-a);
   const yearSel = document.getElementById('yearFilter');
   years.forEach(y => {
     const opt = document.createElement('option');
