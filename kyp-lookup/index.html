@@ -160,6 +160,9 @@
   .field .val { color: var(--text); font-family: var(--mono); word-break: break-word; }
   .field .val.empty { color: #4a4f5a; }
   .no-results { text-align: center; padding: 60px 20px; color: var(--text-dim); }
+  .group-card { border-left: 3px solid var(--accent); }
+  .group-header:hover .corp-name { color: var(--accent); }
+  .group-card .hint { margin: 4px 0 0 0 !important; }
   .pagination {
     display: flex;
     justify-content: center;
@@ -235,14 +238,32 @@ async function loadData() {
   render();
 }
 
+function normalizeCorp(name) {
+  if (!name) return '';
+  let n = name.toLowerCase().trim();
+  n = n.replace(/[.,\-_/()]/g, ' ');
+  n = n.replace(/\s+/g, ' ').trim();
+  const suffixes = [' private limited', ' pvt ltd', ' ltd', ' limited', ' technologies', ' technology', ' pvt', ' llp', ' inc', ' co'];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const s of suffixes) {
+      if (n.endsWith(s)) { n = n.slice(0, -s.length).trim(); changed = true; }
+    }
+  }
+  return n;
+}
+
 function buildCombined() {
   combinedRows = [];
 
   policyData.rows.forEach((r, i) => {
+    const corp = policyData.dicts.corp[r[0]] || '';
     combinedRows.push({
       type: 'policy',
       idx: i,
-      corp: policyData.dicts.corp[r[0]] || '',
+      corp: corp,
+      normCorp: normalizeCorp(corp),
       ins: policyData.dicts.ins[r[1]] || '',
       tpa: policyData.dicts.tpa[r[2]] || '',
       cat: '',
@@ -252,10 +273,12 @@ function buildCombined() {
   });
 
   caseData.rows.forEach((r, i) => {
+    const corp = caseData.dicts.corp[r[0]] || '';
     combinedRows.push({
       type: 'case',
       idx: i,
-      corp: caseData.dicts.corp[r[0]] || '',
+      corp: corp,
+      normCorp: normalizeCorp(corp),
       ins: caseData.dicts.ins[r[1]] || '',
       tpa: caseData.dicts.tpa[r[2]] || '',
       cat: caseData.dicts.cat[r[12]] || '',
@@ -270,6 +293,24 @@ function buildCombined() {
     ignoreLocation: true,
     minMatchCharLength: 2
   });
+}
+
+function groupByCorp(items) {
+  const groups = new Map();
+  const order = [];
+  items.forEach(item => {
+    const key = item.normCorp || ('__ungrouped__' + item.corp);
+    if (!groups.has(key)) {
+      groups.set(key, { key, displayName: item.corp, items: [] });
+      order.push(key);
+    }
+    groups.get(key).items.push(item);
+    // prefer the longest/most complete-looking name as display name
+    if (item.corp.length > groups.get(key).displayName.length) {
+      groups.get(key).displayName = item.corp;
+    }
+  });
+  return order.map(k => groups.get(k));
 }
 
 function populateFilters() {
@@ -320,16 +361,75 @@ function getFiltered() {
   return items;
 }
 
+function renderRecordCard(item) {
+  if (item.type === 'policy') {
+    const r = item.raw, d = policyData.dicts;
+    const yearBadge = r[12] ? `<span class="badge year">${r[12]}</span>` : `<span class="badge year">No date</span>`;
+    return `
+      <div class="card policy">
+        <div class="card-top">
+          <div class="corp-name">${escapeHtml(d.corp[r[0]] || 'Unknown corporate')}</div>
+          <div>
+            <span class="badge type-policy">POLICY</span>
+            ${yearBadge}
+            <span class="badge ins">${escapeHtml(d.ins[r[1]] || 'Unknown insurer')}</span>
+          </div>
+        </div>
+        <div class="grid">
+          ${fieldHtml('TPA', d.tpa[r[2]])}
+          ${fieldHtml('Relation', d.rel[r[3]])}
+          ${fieldHtml('Sum Insured', d.si[r[4]])}
+          ${fieldHtml('Room Rent', d.rr[r[5]])}
+          ${fieldHtml('Waiting Period', d.wp[r[6]])}
+          ${fieldHtml('Disease', d.dis[r[7]])}
+          ${fieldHtml('Co-Payment', d.cop[r[8]])}
+          ${fieldHtml('PED Covered', d.ped[r[9]])}
+          ${fieldHtml('Policy Start', r[10])}
+          ${fieldHtml('Expiry', r[11])}
+        </div>
+      </div>`;
+  } else {
+    const r = item.raw, d = caseData.dicts;
+    const yearBadge = r[14] ? `<span class="badge year">${r[14]}</span>` : `<span class="badge year">No date</span>`;
+    return `
+      <div class="card case">
+        <div class="card-top">
+          <div class="corp-name">${escapeHtml(d.corp[r[0]] || 'Unknown corporate')}</div>
+          <div>
+            <span class="badge type-case">CASE</span>
+            ${yearBadge}
+            <span class="badge ins">${escapeHtml(d.ins[r[1]] || 'Unknown insurer')}</span>
+          </div>
+        </div>
+        <div class="grid">
+          ${fieldHtml('TPA', d.tpa[r[2]])}
+          ${fieldHtml('Policy Type', d.ptype[r[3]])}
+          ${fieldHtml('Gipsa', d.gipsa[r[4]])}
+          ${fieldHtml('Sum Insured', d.si[r[5]])}
+          ${fieldHtml('Balance SI', d.bsi[r[6]])}
+          ${fieldHtml('Co-Pay', d.cop[r[7]])}
+          ${fieldHtml('Disease Capping', d.dis[r[8]])}
+          ${fieldHtml('Room', d.room[r[9]])}
+          ${fieldHtml('Coverage', d.cov[r[10]])}
+          ${fieldHtml('Treatment', d.treat[r[11]])}
+          ${fieldHtml('Category', d.cat[r[12]])}
+          ${fieldHtml('Policy Date', r[13])}
+        </div>
+      </div>`;
+  }
+}
+
 function render() {
   const items = getFiltered();
-  state.filtered = items;
+  const groups = groupByCorp(items);
+  state.filtered = groups;
   state.page = 1;
 
   const policyCount = items.filter(i => i.type === 'policy').length;
   const caseCount = items.filter(i => i.type === 'case').length;
 
   document.getElementById('stats').innerHTML =
-    `Matches: <b>${items.length.toLocaleString()}</b> &nbsp;|&nbsp; Policy: <b>${policyCount.toLocaleString()}</b> &nbsp;|&nbsp; Case: <b>${caseCount.toLocaleString()}</b>`;
+    `Matches: <b>${items.length.toLocaleString()}</b> &nbsp;|&nbsp; Corporates: <b>${groups.length.toLocaleString()}</b> &nbsp;|&nbsp; Policy: <b>${policyCount.toLocaleString()}</b> &nbsp;|&nbsp; Case: <b>${caseCount.toLocaleString()}</b>`;
 
   renderPage();
 }
@@ -337,74 +437,61 @@ function render() {
 function renderPage() {
   const { filtered, page } = state;
   const start = (page - 1) * PAGE_SIZE;
-  const pageItems = filtered.slice(start, start + PAGE_SIZE);
+  const pageGroups = filtered.slice(start, start + PAGE_SIZE);
   const container = document.getElementById('results');
 
-  if (pageItems.length === 0) {
+  if (pageGroups.length === 0) {
     container.innerHTML = `<div class="no-results">No matching records. Try a broader search term.</div>`;
     document.getElementById('pagination').innerHTML = '';
     return;
   }
 
-  container.innerHTML = pageItems.map(item => {
-    if (item.type === 'policy') {
-      const r = item.raw, d = policyData.dicts;
-      const yearBadge = r[12] ? `<span class="badge year">${r[12]}</span>` : `<span class="badge year">No date</span>`;
-      return `
-        <div class="card policy">
-          <div class="card-top">
-            <div class="corp-name">${escapeHtml(d.corp[r[0]] || 'Unknown corporate')}</div>
-            <div>
-              <span class="badge type-policy">POLICY</span>
-              ${yearBadge}
-              <span class="badge ins">${escapeHtml(d.ins[r[1]] || 'Unknown insurer')}</span>
-            </div>
-          </div>
-          <div class="grid">
-            ${fieldHtml('TPA', d.tpa[r[2]])}
-            ${fieldHtml('Relation', d.rel[r[3]])}
-            ${fieldHtml('Sum Insured', d.si[r[4]])}
-            ${fieldHtml('Room Rent', d.rr[r[5]])}
-            ${fieldHtml('Waiting Period', d.wp[r[6]])}
-            ${fieldHtml('Disease', d.dis[r[7]])}
-            ${fieldHtml('Co-Payment', d.cop[r[8]])}
-            ${fieldHtml('PED Covered', d.ped[r[9]])}
-            ${fieldHtml('Policy Start', r[10])}
-            ${fieldHtml('Expiry', r[11])}
-          </div>
-        </div>`;
-    } else {
-      const r = item.raw, d = caseData.dicts;
-      const yearBadge = r[14] ? `<span class="badge year">${r[14]}</span>` : `<span class="badge year">No date</span>`;
-      return `
-        <div class="card case">
-          <div class="card-top">
-            <div class="corp-name">${escapeHtml(d.corp[r[0]] || 'Unknown corporate')}</div>
-            <div>
-              <span class="badge type-case">CASE</span>
-              ${yearBadge}
-              <span class="badge ins">${escapeHtml(d.ins[r[1]] || 'Unknown insurer')}</span>
-            </div>
-          </div>
-          <div class="grid">
-            ${fieldHtml('TPA', d.tpa[r[2]])}
-            ${fieldHtml('Policy Type', d.ptype[r[3]])}
-            ${fieldHtml('Gipsa', d.gipsa[r[4]])}
-            ${fieldHtml('Sum Insured', d.si[r[5]])}
-            ${fieldHtml('Balance SI', d.bsi[r[6]])}
-            ${fieldHtml('Co-Pay', d.cop[r[7]])}
-            ${fieldHtml('Disease Capping', d.dis[r[8]])}
-            ${fieldHtml('Room', d.room[r[9]])}
-            ${fieldHtml('Coverage', d.cov[r[10]])}
-            ${fieldHtml('Treatment', d.treat[r[11]])}
-            ${fieldHtml('Category', d.cat[r[12]])}
-            ${fieldHtml('Policy Date', r[13])}
-          </div>
-        </div>`;
+  container.innerHTML = pageGroups.map((group, gi) => {
+    const groupId = `grp-${start + gi}`;
+    const count = group.items.length;
+    const variantCount = new Set(group.items.map(i => i.corp)).size;
+    const policyN = group.items.filter(i => i.type === 'policy').length;
+    const caseN = group.items.filter(i => i.type === 'case').length;
+
+    if (count === 1) {
+      // single record: just show the card directly, no grouping chrome needed
+      return renderRecordCard(group.items[0]);
     }
+
+    const variantNote = variantCount > 1
+      ? `<span class="hint" style="margin:0;">${variantCount} name variants merged</span>`
+      : '';
+
+    return `
+      <div class="card group-card">
+        <div class="group-header" onclick="toggleGroup('${groupId}')" style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+          <div class="corp-name">${escapeHtml(group.displayName || 'Unknown corporate')}</div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${policyN ? `<span class="badge type-policy">${policyN} POLICY</span>` : ''}
+            ${caseN ? `<span class="badge type-case">${caseN} CASE</span>` : ''}
+            <span class="badge year" id="${groupId}-arrow">\u25be Show ${count} records</span>
+          </div>
+        </div>
+        ${variantNote}
+        <div class="group-body" id="${groupId}" style="display:none; margin-top:12px; flex-direction: column; gap: 8px;">
+          ${group.items.map(renderRecordCard).join('')}
+        </div>
+      </div>`;
   }).join('');
 
   renderPagination();
+}
+
+function toggleGroup(groupId) {
+  const body = document.getElementById(groupId);
+  const arrow = document.getElementById(groupId + '-arrow');
+  if (!body) return;
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'flex';
+  if (arrow) {
+    const count = body.querySelectorAll('.card').length;
+    arrow.textContent = isOpen ? `\u25be Show ${count} records` : `\u25b4 Hide records`;
+  }
 }
 
 function renderPagination() {
