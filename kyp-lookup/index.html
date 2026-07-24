@@ -263,8 +263,8 @@ let caseState = { page: 1, filtered: [] };
 
 async function loadData() {
   const [pRes, cRes] = await Promise.all([
-    fetch('policy_data.json'),
-    fetch('case_data.json')
+    fetch('policy_data.json?v=' + Date.now()),
+    fetch('case_data.json?v=' + Date.now())
   ]);
   policyData = await pRes.json();
   caseData = await cRes.json();
