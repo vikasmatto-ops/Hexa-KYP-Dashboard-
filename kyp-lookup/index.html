@@ -238,20 +238,17 @@ async function loadData() {
   render();
 }
 
+const CORP_STOPWORDS = new Set(['private','limited','ltd','pvt','technologies','technology','tech',
+  'llp','inc','co','company','corporation','corp','sez','non','group','india','services','service',
+  'solutions','solution']);
+
 function normalizeCorp(name) {
   if (!name) return '';
   let n = name.toLowerCase().trim();
-  n = n.replace(/[.,\-_/()]/g, ' ');
+  n = n.replace(/[.,\-_/()&]/g, ' ');
   n = n.replace(/\s+/g, ' ').trim();
-  const suffixes = [' private limited', ' pvt ltd', ' ltd', ' limited', ' technologies', ' technology', ' pvt', ' llp', ' inc', ' co'];
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const s of suffixes) {
-      if (n.endsWith(s)) { n = n.slice(0, -s.length).trim(); changed = true; }
-    }
-  }
-  return n;
+  const words = n.split(' ').filter(w => w && !CORP_STOPWORDS.has(w));
+  return words.join(' ');
 }
 
 function buildCombined() {
@@ -405,6 +402,9 @@ function renderRecordCard(item) {
           ${fieldHtml('PED Covered', d.ped[r[9]])}
           ${fieldHtml('Policy Start', r[10])}
           ${fieldHtml('Expiry', r[11])}
+          ${fieldHtml('Disease Capping Amt', d.dcamt[r[13]])}
+          ${fieldHtml('Any Other Capping', d.othcap[r[14]])}
+          ${fieldHtml('Disease Capping %', d.dcpct[r[15]])}
         </div>
       </div>`;
   } else {
