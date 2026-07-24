@@ -337,12 +337,31 @@ function fieldHtml(label, val) {
 }
 
 function getFiltered() {
-  const q = document.getElementById('search').value.trim();
+  const q = document.getElementById('search').value.trim().toLowerCase();
   const yearFilter = document.getElementById('yearFilter').value;
 
   let items;
   if (q.length >= 2) {
-    items = combinedFuse.search(q).map(r => r.item);
+    // Substring match first (catches all true matches regardless of string length/query length)
+    const substringMatches = combinedRows.filter(item =>
+      (item.corp && item.corp.toLowerCase().includes(q)) ||
+      (item.ins && item.ins.toLowerCase().includes(q)) ||
+      (item.tpa && item.tpa.toLowerCase().includes(q)) ||
+      (item.cat && item.cat.toLowerCase().includes(q))
+    );
+    // Fuzzy match catches typo variants substring misses
+    const fuzzyMatches = combinedFuse.search(q).map(r => r.item);
+
+    // Merge, dedupe by identity (idx + type)
+    const seen = new Set();
+    items = [];
+    [...substringMatches, ...fuzzyMatches].forEach(item => {
+      const key = item.type + '-' + item.idx;
+      if (!seen.has(key)) {
+        seen.add(key);
+        items.push(item);
+      }
+    });
   } else {
     items = combinedRows;
   }
