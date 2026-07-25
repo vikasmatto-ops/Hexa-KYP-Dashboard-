@@ -248,6 +248,30 @@
   }
   .btn-merge { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-dim); }
   .btn-reject { background: var(--panel); color: var(--text-dim); }
+  .btn-sync {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-sync:hover { border-color: var(--accent-dim); color: var(--accent); }
+  .bulk-actions { padding: 0 18px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+  .btn-bulk {
+    background: var(--accent-dim);
+    border: 1px solid var(--accent-dim);
+    color: var(--accent);
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+  }
+  .btn-bulk:hover { background: var(--accent); color: #06231a; }
   .group-card { border-left: 3px solid var(--accent); }
   .group-header:hover .corp-name { color: var(--accent); }
   .group-card .hint { margin: 4px 0 0 0 !important; }
@@ -311,8 +335,13 @@
         <div style="font-size:16px; font-weight:700;">Possible Duplicate Names</div>
         <div class="hint" style="margin:2px 0 0 0;"><span id="reviewCount">0</span> pairs need your review</div>
       </div>
-      <button class="review-close" onclick="closeReviewPanel()">\u2715</button>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn-sync" onclick="downloadCorrectedData()" title="Download policy_data.json and case_data.json with your confirmed name corrections applied">\u2b07\ufe0f Download Corrected Data</button>
+        <button class="review-close" onclick="closeReviewPanel()">\u2715</button>
+      </div>
     </div>
+    <div class="hint" style="padding:0 18px; margin:10px 0 0 0;">When you're done reviewing (or partway through), click Download to get updated data files with your confirmed corrections baked in. Upload both to GitHub (same filenames) to make the fix permanent for everyone \u2014 including anyone else using this dashboard.</div>
+    <div class="bulk-actions" id="bulkActions"></div>
     <div class="review-list" id="reviewList"></div>
   </div>
 </div>
@@ -472,6 +501,29 @@ function yearTpaOverlapScore(sigA, sigB) {
   return { sharedYears, matchingYears };
 }
 
+function isJunkFragment(w) {
+  // very short fragments (single/double chars) or pure-numeric tokens are usually OCR/typing noise, not meaningful words
+  if (!w) return false;
+  if (w.length <= 2) return true;
+  if (/^\d+$/.test(w)) return true;
+  return false;
+}
+
+function classifyPairPattern(a, b) {
+  // plural/singular: one is exactly the other + "s"
+  if (a + 's' === b || b + 's' === a) return 'plural_singular';
+
+  // extra/missing single word, and that word looks like junk (not a meaningful distinguishing term)
+  const setA = new Set(a.split(' '));
+  const setB = new Set(b.split(' '));
+  const diffAB = [...setA].filter(w => !setB.has(w));
+  const diffBA = [...setB].filter(w => !setA.has(w));
+  if (diffAB.length === 1 && diffBA.length === 0 && isJunkFragment(diffAB[0])) return 'junk_fragment';
+  if (diffBA.length === 1 && diffAB.length === 0 && isJunkFragment(diffBA[0])) return 'junk_fragment';
+
+  return 'other';
+}
+
 function computeDuplicateClusters() {
   // Build normKey -> {displayName, count} for grouping keys (post-stopword, pre-fuzzy)
   const keyInfo = new Map();
@@ -535,7 +587,8 @@ function computeDuplicateClusters() {
             corpB: keyInfo.get(b).corp,
             countA: keyInfo.get(a).count,
             countB: keyInfo.get(b).count,
-            dist, sharedYears, matchingYears
+            dist, sharedYears, matchingYears,
+            pattern: classifyPairPattern(a, b)
           });
         }
       }
@@ -561,6 +614,81 @@ function persistMergeDecisions() {
   try {
     localStorage.setItem(MERGE_DECISIONS_KEY, JSON.stringify(savedMergeDecisions));
   } catch (e) { /* storage full or unavailable, ignore */ }
+}
+
+function buildRawNameCorrectionMap() {
+  // window.CORP_KEY_REMAP maps normalized-key -> normalized-key (merged-away -> canonical)
+  // We need raw display name -> raw display name, since that's what's actually stored in the JSON dicts.
+  // Strategy: for each normalized key that got merged away, find the "best" (longest) raw display
+  // name seen for the canonical key it merged into, and map every raw name under the merged-away
+  // key onto that.
+  const normToRawNames = new Map(); // normCorp -> Set of raw names seen
+  combinedRows.forEach(item => {
+    if (!item.normCorp) return;
+    if (!normToRawNames.has(item.normCorp)) normToRawNames.set(item.normCorp, new Map());
+    const rawMap = normToRawNames.get(item.normCorp);
+    rawMap.set(item.corp, (rawMap.get(item.corp) || 0) + 1);
+  });
+
+  function pickCanonicalRawName(normKey) {
+    const rawMap = normToRawNames.get(normKey);
+    if (!rawMap || rawMap.size === 0) return null;
+    // prefer the most frequently occurring raw spelling; tie-break on longer (more complete) name
+    let best = null, bestScore = -1;
+    for (const [raw, count] of rawMap) {
+      const score = count * 1000 + raw.length;
+      if (score > bestScore) { bestScore = score; best = raw; }
+    }
+    return best;
+  }
+
+  const rawCorrectionMap = new Map(); // raw name -> corrected raw name
+  window.CORP_KEY_REMAP.forEach((canonicalNormKey, mergedAwayNormKey) => {
+    const canonicalRaw = pickCanonicalRawName(canonicalNormKey);
+    if (!canonicalRaw) return;
+    const rawMap = normToRawNames.get(mergedAwayNormKey);
+    if (!rawMap) return;
+    for (const raw of rawMap.keys()) {
+      rawCorrectionMap.set(raw, canonicalRaw);
+    }
+  });
+
+  return rawCorrectionMap;
+}
+
+function downloadJson(filename, obj) {
+  const blob = new Blob([JSON.stringify(obj)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function downloadCorrectedData() {
+  const mergedPairCount = window.CORP_KEY_REMAP.size;
+  if (mergedPairCount === 0) {
+    alert('No merges to apply yet \u2014 review or bulk-merge some duplicate names first.');
+    return;
+  }
+
+  const rawCorrectionMap = buildRawNameCorrectionMap();
+
+  // Rewrite policy_data.json corp dictionary
+  const correctedPolicy = JSON.parse(JSON.stringify(policyData)); // deep clone, don't mutate live data
+  correctedPolicy.dicts.corp = correctedPolicy.dicts.corp.map(name => rawCorrectionMap.get(name) || name);
+
+  // Rewrite case_data.json corp dictionary
+  const correctedCase = JSON.parse(JSON.stringify(caseData));
+  correctedCase.dicts.corp = correctedCase.dicts.corp.map(name => rawCorrectionMap.get(name) || name);
+
+  downloadJson('policy_data.json', correctedPolicy);
+  setTimeout(() => downloadJson('case_data.json', correctedCase), 300); // slight stagger so both downloads trigger reliably
+
+  alert(`Downloaded corrected policy_data.json and case_data.json.\n\n${rawCorrectionMap.size} corporate name variants were standardized based on your ${mergedPairCount} confirmed merges.\n\nUpload both files to your kyp-lookup folder on GitHub (same filenames, will overwrite) to make this permanent for everyone.`);
 }
 
 function pairKey(a, b) {
@@ -628,15 +756,49 @@ function closeReviewPanel() {
   document.getElementById('reviewOverlay').style.display = 'none';
 }
 
+function bulkMergePattern(pattern) {
+  const matching = dupeClusters.reviewQueue.filter(p => p.pattern === pattern);
+  if (matching.length === 0) return;
+  const label = pattern === 'plural_singular' ? 'plural/singular' : 'stray-character';
+  if (!confirm(`Merge all ${matching.length} ${label} pairs as the same company? This applies to all of them at once.`)) return;
+
+  matching.forEach(pair => {
+    const pk = pairKey(pair.a, pair.b);
+    savedMergeDecisions.merged = savedMergeDecisions.merged || {};
+    savedMergeDecisions.merged[pk] = true;
+    window.CORP_KEY_REMAP.set(pair.b, pair.a);
+  });
+  persistMergeDecisions();
+  dupeClusters.reviewQueue = dupeClusters.reviewQueue.filter(p => p.pattern !== pattern);
+  renderDupeBanner();
+  renderReviewPanel();
+  render();
+}
+
 function renderReviewPanel() {
   const container = document.getElementById('reviewList');
   const queue = dupeClusters.reviewQueue;
   document.getElementById('reviewCount').textContent = queue.length;
 
   if (queue.length === 0) {
+    document.getElementById('bulkActions').innerHTML = '';
     container.innerHTML = `<div class="no-results">All caught up \u2014 no pairs left to review.</div>`;
     return;
   }
+
+  const pluralCount = queue.filter(p => p.pattern === 'plural_singular').length;
+  const junkCount = queue.filter(p => p.pattern === 'junk_fragment').length;
+
+  const bulkHtml = [];
+  if (pluralCount > 0) {
+    bulkHtml.push(`<button class="btn-bulk" onclick="bulkMergePattern('plural_singular')">\u2713\u2713 Merge all ${pluralCount} plural/singular pairs (e.g. "Networks" vs "Network")</button>`);
+  }
+  if (junkCount > 0) {
+    bulkHtml.push(`<button class="btn-bulk" onclick="bulkMergePattern('junk_fragment')">\u2713\u2713 Merge all ${junkCount} stray-character pairs (e.g. trailing "1" or ":")</button>`);
+  }
+  document.getElementById('bulkActions').innerHTML = bulkHtml.length
+    ? `<div class="hint" style="margin:0 0 6px 0;">Quick bulk actions \u2014 these patterns are usually safe:</div>` + bulkHtml.join('')
+    : '';
 
   container.innerHTML = queue.slice(0, 100).map(pair => {
     const confidence = pair.matchingYears >= 1 ? 'Some year/TPA overlap' : (pair.sharedYears > 0 ? 'Years overlap, different TPA' : 'No year data to check');
