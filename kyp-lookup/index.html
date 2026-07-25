@@ -703,9 +703,27 @@ function pairKey(a, b) {
 function applySavedMergeDecisions() {
   // Apply any previously-confirmed manual merges to the remap table,
   // and remove any previously-rejected pairs from the review queue.
+  //
+  // IMPORTANT: we do NOT trust the stored key order here. Old decisions saved before
+  // a bug fix may have recorded the wrong direction (alphabetical instead of by
+  // frequency). We re-derive which name is canonical every time, using current
+  // record counts, so a previously-mis-recorded decision self-corrects rather than
+  // permanently locking in the earlier bug. The underlying decision (these two
+  // names ARE the same company) is preserved -- only the direction is recomputed.
+  const keyCountCache = new Map();
+  combinedRows.forEach(item => {
+    if (!item.normCorp) return;
+    keyCountCache.set(item.normCorp, (keyCountCache.get(item.normCorp) || 0) + 1);
+  });
+
   Object.keys(savedMergeDecisions.merged || {}).forEach(pk => {
-    const [a, b] = pk.split('|||');
-    if (!window.CORP_KEY_REMAP.has(b)) window.CORP_KEY_REMAP.set(b, a);
+    const [x, y] = pk.split('|||');
+    const countX = keyCountCache.get(x) || 0;
+    const countY = keyCountCache.get(y) || 0;
+    const [canonical, mergedAway] = countX >= countY ? [x, y] : [y, x];
+    if (!window.CORP_KEY_REMAP.has(mergedAway) || window.CORP_KEY_REMAP.get(mergedAway) !== canonical) {
+      window.CORP_KEY_REMAP.set(mergedAway, canonical);
+    }
   });
   dupeClusters.reviewQueue = dupeClusters.reviewQueue.filter(pair => {
     const pk = pairKey(pair.a, pair.b);
