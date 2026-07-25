@@ -577,8 +577,13 @@ function computeDuplicateClusters() {
         const safeSpellingMatch = dist === 1 && maxLen >= 8 && !(isSingleWord && shortName);
 
         if (safeSpellingMatch && (hasStrongCorroboration || hasNoData)) {
-          remap.set(b, a);
-          visited.add(b);
+          // Pick canonical based on which key has MORE actual records, not alphabetical order,
+          // so a common correct spelling never gets overwritten by a rare typo.
+          const countA = keyInfo.get(a).count;
+          const countB = keyInfo.get(b).count;
+          const [canonical, mergedAway] = countA >= countB ? [a, b] : [b, a];
+          remap.set(mergedAway, canonical);
+          visited.add(mergedAway);
           autoMergedCount++;
         } else {
           reviewQueue.push({
@@ -710,12 +715,20 @@ function applySavedMergeDecisions() {
   });
 }
 
-function confirmMerge(a, b) {
+function confirmMerge(a, b, countA, countB) {
   const pk = pairKey(a, b);
   savedMergeDecisions.merged = savedMergeDecisions.merged || {};
   savedMergeDecisions.merged[pk] = true;
   persistMergeDecisions();
-  window.CORP_KEY_REMAP.set(b, a);
+  // Merge the LESS common spelling into the MORE common one, so a rare typo never
+  // overwrites a well-established correct name, regardless of click order.
+  const a_count = typeof countA === 'number' ? countA : 0;
+  const b_count = typeof countB === 'number' ? countB : 0;
+  if (a_count >= b_count) {
+    window.CORP_KEY_REMAP.set(b, a);
+  } else {
+    window.CORP_KEY_REMAP.set(a, b);
+  }
   dupeClusters.reviewQueue = dupeClusters.reviewQueue.filter(p => pairKey(p.a, p.b) !== pk);
   renderDupeBanner();
   renderReviewPanel();
@@ -766,7 +779,11 @@ function bulkMergePattern(pattern) {
     const pk = pairKey(pair.a, pair.b);
     savedMergeDecisions.merged = savedMergeDecisions.merged || {};
     savedMergeDecisions.merged[pk] = true;
-    window.CORP_KEY_REMAP.set(pair.b, pair.a);
+    if (pair.countA >= pair.countB) {
+      window.CORP_KEY_REMAP.set(pair.b, pair.a);
+    } else {
+      window.CORP_KEY_REMAP.set(pair.a, pair.b);
+    }
   });
   persistMergeDecisions();
   dupeClusters.reviewQueue = dupeClusters.reviewQueue.filter(p => p.pattern !== pattern);
@@ -811,7 +828,7 @@ function renderReviewPanel() {
         </div>
         <div class="review-meta">Edit distance: ${pair.dist} &nbsp;|&nbsp; ${confidence}</div>
         <div class="review-actions">
-          <button class="btn-merge" onclick="confirmMerge('${pair.a.replace(/'/g,"\\'")}', '${pair.b.replace(/'/g,"\\'")}')">\u2713 Same company \u2014 Merge</button>
+          <button class="btn-merge" onclick="confirmMerge('${pair.a.replace(/'/g,"\\'")}', '${pair.b.replace(/'/g,"\\'")}', ${pair.countA}, ${pair.countB})">\u2713 Same company \u2014 Merge</button>
           <button class="btn-reject" onclick="rejectMerge('${pair.a.replace(/'/g,"\\'")}', '${pair.b.replace(/'/g,"\\'")}')">\u2717 Different \u2014 Keep separate</button>
         </div>
       </div>`;
