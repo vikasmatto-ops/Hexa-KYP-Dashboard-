@@ -160,6 +160,94 @@
   .field .val { color: var(--text); font-family: var(--mono); word-break: break-word; }
   .field .val.empty { color: #4a4f5a; }
   .no-results { text-align: center; padding: 60px 20px; color: var(--text-dim); }
+  .dupe-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--case-dim);
+    border: 1px solid var(--case-color);
+    border-radius: 8px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    color: var(--text);
+    flex-wrap: wrap;
+  }
+  .btn-review {
+    background: var(--case-color);
+    color: #1a1200;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .review-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .review-modal {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 720px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .review-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .review-close {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 30px; height: 30px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .review-list {
+    overflow-y: auto;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .review-pair {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .review-names { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .review-name { font-weight: 600; font-size: 13.5px; }
+  .review-vs { color: var(--text-dim); font-size: 11px; text-transform: uppercase; }
+  .review-meta { font-size: 11.5px; color: var(--text-dim); font-family: var(--mono); margin-bottom: 10px; }
+  .review-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn-merge, .btn-reject {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid var(--border);
+  }
+  .btn-merge { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-dim); }
+  .btn-reject { background: var(--panel); color: var(--text-dim); }
   .group-card { border-left: 3px solid var(--accent); }
   .group-header:hover .corp-name { color: var(--accent); }
   .group-card .hint { margin: 4px 0 0 0 !important; }
@@ -209,10 +297,24 @@
   </div>
 
   <div class="hint">Fuzzy search tolerates typos/variants. Each result is tagged Policy or Case so you know its source.</div>
+  <div class="dupe-banner" id="dupeBanner" style="display:none;"></div>
   <div class="stat-bar" id="stats"></div>
   <div class="results" id="results"></div>
   <div class="pagination" id="pagination"></div>
 
+</div>
+
+<div class="review-overlay" id="reviewOverlay" style="display:none;">
+  <div class="review-modal">
+    <div class="review-modal-header">
+      <div>
+        <div style="font-size:16px; font-weight:700;">Possible Duplicate Names</div>
+        <div class="hint" style="margin:2px 0 0 0;"><span id="reviewCount">0</span> pairs need your review</div>
+      </div>
+      <button class="review-close" onclick="closeReviewPanel()">\u2715</button>
+    </div>
+    <div class="review-list" id="reviewList"></div>
+  </div>
 </div>
 
 <script>
@@ -231,11 +333,22 @@ async function loadData() {
   caseData = await cRes.json();
 
   document.getElementById('headerMeta').textContent =
-    `${policyData.rows.length.toLocaleString()} policy records \u00b7 ${caseData.rows.length.toLocaleString()} case records`;
+    `${policyData.rows.length.toLocaleString()} policy records \u00b7 ${caseData.rows.length.toLocaleString()} case records \u00b7 checking for duplicate names\u2026`;
 
   buildCombined();
+  loadSavedMergeDecisions();
+
+  // brief timeout lets the "checking duplicates" message paint before the sync clustering work runs
+  await new Promise(resolve => setTimeout(resolve, 30));
+
+  computeDuplicateClusters();
+  applySavedMergeDecisions();
   populateFilters();
+  renderDupeBanner();
   render();
+
+  document.getElementById('headerMeta').textContent =
+    `${policyData.rows.length.toLocaleString()} policy records \u00b7 ${caseData.rows.length.toLocaleString()} case records`;
 }
 
 const CORP_STOPWORDS = new Set(['private','limited','ltd','pvt','technologies','technology','tech',
@@ -296,19 +409,253 @@ function groupByCorp(items) {
   const groups = new Map();
   const order = [];
   items.forEach(item => {
-    const key = item.normCorp || ('__ungrouped__' + item.corp);
+    let key = item.normCorp || ('__ungrouped__' + item.corp);
+    // apply auto-merge remapping if this key was merged into another during clustering
+    if (window.CORP_KEY_REMAP && window.CORP_KEY_REMAP.has(key)) {
+      key = window.CORP_KEY_REMAP.get(key);
+    }
     if (!groups.has(key)) {
       groups.set(key, { key, displayName: item.corp, items: [] });
       order.push(key);
     }
     groups.get(key).items.push(item);
-    // prefer the longest/most complete-looking name as display name
     if (item.corp.length > groups.get(key).displayName.length) {
       groups.get(key).displayName = item.corp;
     }
   });
   return order.map(k => groups.get(k));
 }
+
+// ---------------- Fuzzy duplicate clustering ----------------
+
+function levenshtein(a, b) {
+  if (a.length < b.length) { const t = a; a = b; b = t; }
+  if (b.length === 0) return a.length;
+  let prev = Array.from({length: b.length + 1}, (_, i) => i);
+  for (let i = 0; i < a.length; i++) {
+    const cur = [i + 1];
+    for (let j = 0; j < b.length; j++) {
+      cur.push(Math.min(prev[j+1] + 1, cur[j] + 1, prev[j] + (a[i] !== b[j] ? 1 : 0)));
+    }
+    prev = cur;
+  }
+  return prev[prev.length - 1];
+}
+
+let dupeClusters = { autoMerged: 0, reviewQueue: [] };
+
+function buildAllYearTpaSignatures() {
+  // O(rows) single pass, instead of re-scanning all rows per candidate pair
+  const sigMap = new Map(); // normCorp -> Map<year, Set<tpa>>
+  combinedRows.forEach(item => {
+    if (!item.normCorp || !item.year || !item.tpa) return;
+    if (!sigMap.has(item.normCorp)) sigMap.set(item.normCorp, new Map());
+    const sig = sigMap.get(item.normCorp);
+    if (!sig.has(item.year)) sig.set(item.year, new Set());
+    sig.get(item.year).add(item.tpa.toLowerCase().trim());
+  });
+  return sigMap;
+}
+
+function yearTpaOverlapScore(sigA, sigB) {
+  if (!sigA || !sigB) return { sharedYears: 0, matchingYears: 0 };
+  let sharedYears = 0;
+  let matchingYears = 0;
+  for (const [year, tpasA] of sigA) {
+    if (sigB.has(year)) {
+      sharedYears++;
+      const tpasB = sigB.get(year);
+      const overlap = [...tpasA].some(t => tpasB.has(t));
+      if (overlap) matchingYears++;
+    }
+  }
+  return { sharedYears, matchingYears };
+}
+
+function computeDuplicateClusters() {
+  // Build normKey -> {displayName, count} for grouping keys (post-stopword, pre-fuzzy)
+  const keyInfo = new Map();
+  combinedRows.forEach(item => {
+    if (!item.normCorp) return;
+    if (!keyInfo.has(item.normCorp)) keyInfo.set(item.normCorp, { corp: item.corp, count: 0 });
+    keyInfo.get(item.normCorp).count++;
+  });
+
+  const keys = [...keyInfo.keys()].filter(k => k.length >= 6).sort();
+
+  // Precompute year+TPA signatures ONCE for all keys (was previously recomputed per-pair, very slow)
+  const allSignatures = buildAllYearTpaSignatures();
+
+  // Blocking by first 3 chars to keep comparisons manageable
+  const buckets = new Map();
+  keys.forEach(k => {
+    const bk = k.slice(0, 3);
+    if (!buckets.has(bk)) buckets.set(bk, []);
+    buckets.get(bk).push(k);
+  });
+
+  const remap = new Map(); // normKey -> canonical merged key (for auto-merged only)
+  const reviewQueue = [];
+  const visited = new Set();
+  let autoMergedCount = 0;
+
+  buckets.forEach(bucketKeys => {
+    for (let i = 0; i < bucketKeys.length; i++) {
+      const a = bucketKeys[i];
+      if (visited.has(a)) continue;
+      for (let j = i + 1; j < bucketKeys.length; j++) {
+        const b = bucketKeys[j];
+        if (visited.has(b)) continue;
+        const maxLen = Math.max(a.length, b.length);
+        const threshold = maxLen < 10 ? 1 : (maxLen < 16 ? 2 : 3);
+        if (Math.abs(a.length - b.length) > threshold) continue;
+        const dist = levenshtein(a, b);
+        if (dist > threshold) continue;
+
+        const isSingleWord = !a.includes(' ') && !b.includes(' ');
+        const shortName = maxLen < 9;
+
+        // Look up precomputed signatures instead of rescanning all rows (was the perf bottleneck)
+        const sigA = allSignatures.get(a);
+        const sigB = allSignatures.get(b);
+        const { sharedYears, matchingYears } = yearTpaOverlapScore(sigA, sigB);
+        const hasStrongCorroboration = matchingYears >= 2;
+        const hasNoData = !sigA && !sigB;
+
+        const safeSpellingMatch = dist === 1 && maxLen >= 8 && !(isSingleWord && shortName);
+
+        if (safeSpellingMatch && (hasStrongCorroboration || hasNoData)) {
+          remap.set(b, a);
+          visited.add(b);
+          autoMergedCount++;
+        } else {
+          reviewQueue.push({
+            a, b,
+            corpA: keyInfo.get(a).corp,
+            corpB: keyInfo.get(b).corp,
+            countA: keyInfo.get(a).count,
+            countB: keyInfo.get(b).count,
+            dist, sharedYears, matchingYears
+          });
+        }
+      }
+    }
+  });
+
+  window.CORP_KEY_REMAP = remap;
+  dupeClusters.autoMerged = autoMergedCount;
+  dupeClusters.reviewQueue = reviewQueue;
+}
+
+const MERGE_DECISIONS_KEY = 'kypLookupMergeDecisions_v1';
+let savedMergeDecisions = { merged: {}, rejected: {} }; // key: "a|||b" -> true
+
+function loadSavedMergeDecisions() {
+  try {
+    const raw = localStorage.getItem(MERGE_DECISIONS_KEY);
+    if (raw) savedMergeDecisions = JSON.parse(raw);
+  } catch (e) { /* ignore corrupt storage */ }
+}
+
+function persistMergeDecisions() {
+  try {
+    localStorage.setItem(MERGE_DECISIONS_KEY, JSON.stringify(savedMergeDecisions));
+  } catch (e) { /* storage full or unavailable, ignore */ }
+}
+
+function pairKey(a, b) {
+  return [a, b].sort().join('|||');
+}
+
+function applySavedMergeDecisions() {
+  // Apply any previously-confirmed manual merges to the remap table,
+  // and remove any previously-rejected pairs from the review queue.
+  Object.keys(savedMergeDecisions.merged || {}).forEach(pk => {
+    const [a, b] = pk.split('|||');
+    if (!window.CORP_KEY_REMAP.has(b)) window.CORP_KEY_REMAP.set(b, a);
+  });
+  dupeClusters.reviewQueue = dupeClusters.reviewQueue.filter(pair => {
+    const pk = pairKey(pair.a, pair.b);
+    if (savedMergeDecisions.rejected && savedMergeDecisions.rejected[pk]) return false;
+    if (savedMergeDecisions.merged && savedMergeDecisions.merged[pk]) return false;
+    return true;
+  });
+}
+
+function confirmMerge(a, b) {
+  const pk = pairKey(a, b);
+  savedMergeDecisions.merged = savedMergeDecisions.merged || {};
+  savedMergeDecisions.merged[pk] = true;
+  persistMergeDecisions();
+  window.CORP_KEY_REMAP.set(b, a);
+  dupeClusters.reviewQueue = dupeClusters.reviewQueue.filter(p => pairKey(p.a, p.b) !== pk);
+  renderDupeBanner();
+  renderReviewPanel();
+  render();
+}
+
+function rejectMerge(a, b) {
+  const pk = pairKey(a, b);
+  savedMergeDecisions.rejected = savedMergeDecisions.rejected || {};
+  savedMergeDecisions.rejected[pk] = true;
+  persistMergeDecisions();
+  dupeClusters.reviewQueue = dupeClusters.reviewQueue.filter(p => pairKey(p.a, p.b) !== pk);
+  renderDupeBanner();
+  renderReviewPanel();
+}
+
+function renderDupeBanner() {
+  const el = document.getElementById('dupeBanner');
+  if (!el) return;
+  const pending = dupeClusters.reviewQueue.length;
+  if (pending === 0) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'flex';
+  el.innerHTML = `
+    <span>\u26a0\ufe0f ${dupeClusters.autoMerged.toLocaleString()} likely duplicate names auto-merged. <b>${pending.toLocaleString()}</b> pairs need your review.</span>
+    <button class="btn-review" onclick="openReviewPanel()">Review Now</button>
+  `;
+}
+
+function openReviewPanel() {
+  document.getElementById('reviewOverlay').style.display = 'flex';
+  renderReviewPanel();
+}
+
+function closeReviewPanel() {
+  document.getElementById('reviewOverlay').style.display = 'none';
+}
+
+function renderReviewPanel() {
+  const container = document.getElementById('reviewList');
+  const queue = dupeClusters.reviewQueue;
+  document.getElementById('reviewCount').textContent = queue.length;
+
+  if (queue.length === 0) {
+    container.innerHTML = `<div class="no-results">All caught up \u2014 no pairs left to review.</div>`;
+    return;
+  }
+
+  container.innerHTML = queue.slice(0, 100).map(pair => {
+    const confidence = pair.matchingYears >= 1 ? 'Some year/TPA overlap' : (pair.sharedYears > 0 ? 'Years overlap, different TPA' : 'No year data to check');
+    return `
+      <div class="review-pair">
+        <div class="review-names">
+          <div class="review-name">${escapeHtml(pair.corpA)} <span class="hint" style="margin:0;">(${pair.countA} records)</span></div>
+          <div class="review-vs">vs</div>
+          <div class="review-name">${escapeHtml(pair.corpB)} <span class="hint" style="margin:0;">(${pair.countB} records)</span></div>
+        </div>
+        <div class="review-meta">Edit distance: ${pair.dist} &nbsp;|&nbsp; ${confidence}</div>
+        <div class="review-actions">
+          <button class="btn-merge" onclick="confirmMerge('${pair.a.replace(/'/g,"\\'")}', '${pair.b.replace(/'/g,"\\'")}')">\u2713 Same company \u2014 Merge</button>
+          <button class="btn-reject" onclick="rejectMerge('${pair.a.replace(/'/g,"\\'")}', '${pair.b.replace(/'/g,"\\'")}')">\u2717 Different \u2014 Keep separate</button>
+        </div>
+      </div>`;
+  }).join('') + (queue.length > 100 ? `<div class="hint" style="text-align:center;margin-top:12px;">Showing first 100 of ${queue.length}. Review these to see more.</div>` : '');
+}
+
 
 function populateFilters() {
   const years = [...new Set(combinedRows.map(r => r.year).filter(y => y >= 2020 && y <= 2026))].sort((a,b) => b-a);
