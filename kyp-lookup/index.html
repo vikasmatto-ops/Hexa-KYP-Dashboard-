@@ -621,6 +621,19 @@ function persistMergeDecisions() {
   } catch (e) { /* storage full or unavailable, ignore */ }
 }
 
+function resolveChainedRemap(key, remap, seen) {
+  // Follow a chain of merges to its final destination.
+  // e.g. if 'a' -> 'b' -> 'c' are all recorded as separate merge decisions,
+  // this returns 'c' for input 'a', instead of stopping at the first hop 'b'.
+  seen = seen || new Set();
+  if (seen.has(key)) return key; // guard against accidental circular chains
+  seen.add(key);
+  if (remap.has(key)) {
+    return resolveChainedRemap(remap.get(key), remap, seen);
+  }
+  return key;
+}
+
 function buildRawNameCorrectionMap() {
   // window.CORP_KEY_REMAP maps normalized-key -> normalized-key (merged-away -> canonical)
   // We need raw display name -> raw display name, since that's what's actually stored in the JSON dicts.
@@ -648,8 +661,11 @@ function buildRawNameCorrectionMap() {
   }
 
   const rawCorrectionMap = new Map(); // raw name -> corrected raw name
-  window.CORP_KEY_REMAP.forEach((canonicalNormKey, mergedAwayNormKey) => {
-    const canonicalRaw = pickCanonicalRawName(canonicalNormKey);
+  window.CORP_KEY_REMAP.forEach((_directTarget, mergedAwayNormKey) => {
+    // Resolve through the full chain, not just the first hop, so a rare typo that
+    // merged into a slightly-less-rare typo still ends up at the ultimate correct name.
+    const finalCanonicalNormKey = resolveChainedRemap(mergedAwayNormKey, window.CORP_KEY_REMAP);
+    const canonicalRaw = pickCanonicalRawName(finalCanonicalNormKey);
     if (!canonicalRaw) return;
     const rawMap = normToRawNames.get(mergedAwayNormKey);
     if (!rawMap) return;
