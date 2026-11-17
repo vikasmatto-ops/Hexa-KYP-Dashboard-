@@ -481,13 +481,15 @@ const PAGE2 = (() => {
     let recs=getRecommendations({city,insurer,tpa,category,procedure,topN:50});
     const hospLookup={};
     DATA.hospitals.forEach(h=>{hospLookup[h.hospitalName.toLowerCase().trim()]=h;});
+    // In-House / Self is a claim-processing channel, not a network TPA.
+    const requireTpaEmpanelment = !!tpa && tpa.trim().toLowerCase() !== 'in-house / self';
     recs=recs.filter(r=>{
       const h=hospLookup[r.hospitalName.toLowerCase().trim()];
       if(!h||h.activeStatus!=='Active')return false;
       if(insurer && h.insurer[insurer]!==true && h.insurerRaw && h.insurerRaw[insurer]!=='No')return false;
       if(insurer && h.insurerRaw && h.insurerRaw[insurer]==='No')return false;
-      if(tpa && h.tpa[tpa]!==true && h.tpaRaw && h.tpaRaw[tpa]!=='No')return false;
-      if(tpa && h.tpaRaw && h.tpaRaw[tpa]==='No')return false;
+      if(requireTpaEmpanelment && h.tpa[tpa]!==true && h.tpaRaw && h.tpaRaw[tpa]!=='No')return false;
+      if(requireTpaEmpanelment && h.tpaRaw && h.tpaRaw[tpa]==='No')return false;
       return true;
     }).slice(0,3);
     if(!recs.length){
