@@ -196,20 +196,24 @@ const PAGE1 = (() => {
     // STRICT filtering — no relaxation + Active hospitals + current empanelment check
     let recs=getRecommendations({city,insurer,tpa,category,procedure,topN:100});
     // Build hospital lookup for status + empanelment
+    // A hospital can have multiple network rows. Never let the last row silently override an earlier valid one.
     const hospLookup={};
-    DATA.hospitals.forEach(h=>{hospLookup[h.hospitalName.toLowerCase().trim()]=h;});
+    DATA.hospitals.forEach(h=>{
+      const key=h.hospitalName.toLowerCase().trim();
+      (hospLookup[key] ||= []).push(h);
+    });
     // In-House / Self is a claim-processing channel, not a network TPA.
     const requireTpaEmpanelment = !!tpa && tpa.trim().toLowerCase() !== 'in-house / self';
-    recs=recs.filter(r=>{
-      const h=hospLookup[r.hospitalName.toLowerCase().trim()];
-      if(!h||h.activeStatus!=='Active')return false;
-      // OPTION A: must be currently empanelled with selected insurer/TPA
-      if(insurer && h.insurer[insurer]!==true && h.insurerRaw && h.insurerRaw[insurer]!=='No')return false;
-      if(insurer && h.insurerRaw && h.insurerRaw[insurer]==='No')return false;
-      if(requireTpaEmpanelment && h.tpa[tpa]!==true && h.tpaRaw && h.tpaRaw[tpa]!=='No')return false;
-      if(requireTpaEmpanelment && h.tpaRaw && h.tpaRaw[tpa]==='No')return false;
-      return true;
-    }).slice(0,8);
+    const eligibleNetworkRow=h=>h && h.activeStatus==='Active'
+      && (!insurer || (h.insurer[insurer]===true && h.insurerRaw?.[insurer]!=='No'))
+      && (!requireTpaEmpanelment || (h.tpa[tpa]===true && h.tpaRaw?.[tpa]!=='No'));
+    const getNetworkRows=name=>hospLookup[name.toLowerCase().trim()]||[];
+    const hasNetworkConflict=(rows,selected)=>rows.length>1 && rows.some(h=>
+      h.activeStatus!==selected.activeStatus
+      || (insurer && h.insurerRaw?.[insurer]!==selected.insurerRaw?.[insurer])
+      || (requireTpaEmpanelment && h.tpaRaw?.[tpa]!==selected.tpaRaw?.[tpa]));
+    recs=recs.filter(r=>getNetworkRows(r.hospitalName).some(eligibleNetworkRow));
+    recs=recs.slice(0,8);
     if(!recs.length){
       const filterDesc=[city?cityLabel(city):'',insurer||'',tpa||'',category||'',procedure||''].filter(Boolean).join(' · ');
       el.innerHTML=`<div style="background:var(--amber-lt);border-left:4px solid var(--amber);border-radius:6px;padding:14px 16px;font-size:13px;color:#92400e;">
@@ -223,7 +227,9 @@ const PAGE1 = (() => {
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;">
       ${recs.map((r,i)=>{
         const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':`#${i+1}`;
-        const hNet=DATA.hospitals.find(h=>h.hospitalName.toLowerCase().trim()===r.hospitalName.toLowerCase().trim());
+        const networkRows=getNetworkRows(r.hospitalName);
+        const hNet=networkRows.find(eligibleNetworkRow);
+        const networkConflict=hNet && hasNetworkConflict(networkRows,hNet);
         const isBest=i===0;
         // Find the last case matching the filter combo for IPD/Lead
         const lastCaseDetails=findLastCaseDetails(r.hospitalName,{city,insurer,tpa,category,procedure});
@@ -236,6 +242,7 @@ const PAGE1 = (() => {
             ${hNet?`<span style="font-size:11px;color:${isBest?'rgba(255,255,255,.75)':(hNet.activeStatus==='Active'?'var(--green)':'var(--red)')};font-weight:600;">${hNet.activeStatus}</span>`:''}
           </div>
           ${lastCaseDetails?`<div style="font-size:10px;font-family:var(--mono);padding:6px 8px;border-radius:6px;background:${isBest?'rgba(0,0,0,.2)':'rgba(0,0,0,.03)'};color:${isBest?'rgba(255,255,255,.85)':'var(--text2)'};border:1px dashed ${isBest?'rgba(255,255,255,.2)':'var(--border)'};">📋 Last case: IPD <strong>${esc(lastCaseDetails.ipdId)}</strong> · Lead <strong>${esc(lastCaseDetails.leadId)}</strong></div>`:''}
+          ${networkConflict?`<div style="margin-top:7px;font-size:10px;font-weight:700;color:${isBest?'#fff':'#b45309'};">⚠ Conflicting network entries — verify cashless status</div>`:''}
         </div>`;
       }).join('')}
     </div>`;
