@@ -474,6 +474,62 @@ const PAGE2 = (() => {
     fillSel('th-city',cities,'');fillSel('th-category',cats,'');fillSel('th-insurer',insurers,'');fillSel('th-tpa',tpas,'');
   }
 
+
+  // Show historical evidence separately from CURRENT network eligibility.
+  // Historical cases must never turn an inactive/non-empanelled hospital into a recommendation.
+  function noEligibleExplanation({city,insurer,tpa,category,procedure}){
+    const same=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
+    const needTpa=!!tpa && !same(tpa,'In-House / Self');
+    const historical=DATA.aspCases.filter(c=>(!city||same(c.city,city))
+      && (!insurer||same(c.insuranceName,insurer))
+      && (!tpa||same(c.tpaName,tpa))
+      && (!category||same(c.category,category))
+      && (!procedure||c.procedureGroup===procedure));
+    const histGroups=new Map();
+    historical.forEach(c=>{
+      const k=String(c.hospitalName||'').trim().toLowerCase();
+      if(!k)return;
+      if(!histGroups.has(k))histGroups.set(k,{name:c.hospitalName,count:0});
+      histGroups.get(k).count++;
+    });
+    const networkRows=name=>DATA.hospitals.filter(h=>same(h.hospitalName,name));
+    const isEligible=h=>h.activeStatus==='Active'
+      && (!city||same(h.city,city))
+      && (!insurer||h.insurer?.[insurer]===true && h.insurerRaw?.[insurer]!=='No')
+      && (!needTpa||h.tpa?.[tpa]===true && h.tpaRaw?.[tpa]!=='No');
+    const activeEligible=new Map();
+    DATA.hospitals.filter(isEligible).forEach(h=>activeEligible.set(String(h.hospitalName).trim().toLowerCase(),h));
+    const histList=[...histGroups.values()].sort((a,b)=>b.count-a.count);
+    const blocked=histList.map(x=>{
+      const rows=networkRows(x.name);
+      let reason='No usable ASP ranking / verify matching';
+      if(!rows.length)reason='Hospital not found in current network';
+      else if(!rows.some(h=>h.activeStatus==='Active'))reason='Inactive / not Active in current network';
+      else if(insurer&&!rows.some(h=>h.activeStatus==='Active' && h.insurer?.[insurer]===true))reason='Insurer not Yes on an Active network row';
+      else if(needTpa&&!rows.some(isEligible))reason='TPA not Yes on an otherwise eligible row';
+      return {...x,reason,eligible:rows.some(isEligible)};
+    });
+    const excluded=blocked.filter(x=>!x.eligible);
+    const desc=[city?cityLabel(city):'',insurer||'',tpa||'',category||'',procedure||''].filter(Boolean).join(' · ');
+    const header=historical.length
+      ? `${historical.length} historical case${historical.length===1?'':'s'} found, but no eligible ranked hospital`
+      : 'No historical cases for the exact selection';
+    const eligibleNames=[...activeEligible.values()];
+    return `<div style="background:var(--amber-lt);border-left:4px solid var(--amber);border-radius:6px;padding:14px 16px;font-size:13px;color:#92400e;">
+      <strong>⚠ ${header}</strong>
+      <div style="font-size:12px;margin-top:5px;">${esc(desc||'Selected filters')}</div>
+      <div style="margin-top:8px;font-size:12px;"><b>Current network eligibility:</b> ${activeEligible.size} Active hospital${activeEligible.size===1?'':'s'} marked Yes for the chosen insurer${needTpa?' and TPA':''}. Historical cases alone do not confirm current cashless eligibility.</div>
+      ${excluded.length?`<div style="margin-top:10px;font-weight:700;font-size:12px;">Historical hospitals excluded from recommendation:</div>
+        <div style="margin-top:4px;display:grid;gap:5px;">${excluded.slice(0,8).map(x=>`<div style="background:rgba(255,255,255,.65);border:1px solid #f6d68d;border-radius:6px;padding:7px 9px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <span>${esc(x.name)} · <b>${x.count} case${x.count===1?'':'s'}</b></span>
+          <span style="color:#a04714;">${esc(x.reason)}</span>
+        </div>`).join('')}</div>${excluded.length>8?`<div style="font-size:11px;">+ ${excluded.length-8} more excluded hospitals</div>`:''}`:''}
+      ${eligibleNames.length?`<div style="margin-top:10px;font-weight:700;font-size:12px;">Active network-listed options (not ASP-ranked; verify before sharing):</div>
+        <div style="margin-top:4px;font-size:12px;">${eligibleNames.slice(0,8).map(h=>esc(h.hospitalName)).join(' · ')}${eligibleNames.length>8?` · +${eligibleNames.length-8} more`:''}</div>`
+        : `<div style="margin-top:8px;font-size:12px;"><b>No currently eligible network option</b> is listed for this selection. Check the Hospital Network Sheet and confirm current empanelment before suggesting cashless.</div>`}
+    </div>`;
+  }
+
   function runComparison(){
     const city=document.getElementById('comp-city')?.value,insurer=document.getElementById('comp-insurer')?.value,tpa=document.getElementById('comp-tpa')?.value,category=document.getElementById('comp-cat')?.value,procedure=document.getElementById('comp-proc')?.value;
     const el=document.getElementById('comp-result');if(!el)return;
@@ -498,11 +554,7 @@ const PAGE2 = (() => {
     recs=recs.filter(r=>getNetworkRows(r.hospitalName).some(eligibleNetworkRow));
     recs=recs.slice(0,3);
     if(!recs.length){
-      const desc=[city?cityLabel(city):'',insurer||'',tpa||'',category||'',procedure||''].filter(Boolean).join(' · ');
-      el.innerHTML=`<div style="background:var(--amber-lt);border-left:4px solid var(--amber);border-radius:6px;padding:14px 16px;font-size:13px;color:#92400e;">
-        <strong>⚠ No cases found</strong> for: ${esc(desc)||'these filters'}
-        <div style="font-size:12px;margin-top:4px;color:#a16207;">Try removing one or more filters.</div>
-      </div>`;
+      el.innerHTML=noEligibleExplanation({city,insurer,tpa,category,procedure});
       return;
     }
     const stats=recs.map(r=>{const res=compareHospitals(r.hospitalName,recs[0].hospitalName,{category,procedure});return res.a.hospitalName===r.hospitalName?res.a:res.b;});
