@@ -479,19 +479,24 @@ const PAGE2 = (() => {
     const el=document.getElementById('comp-result');if(!el)return;
     // STRICT filtering — Active + current empanelment status
     let recs=getRecommendations({city,insurer,tpa,category,procedure,topN:50});
+    // A hospital can have multiple network rows. Never let the last row silently override an earlier valid one.
     const hospLookup={};
-    DATA.hospitals.forEach(h=>{hospLookup[h.hospitalName.toLowerCase().trim()]=h;});
+    DATA.hospitals.forEach(h=>{
+      const key=h.hospitalName.toLowerCase().trim();
+      (hospLookup[key] ||= []).push(h);
+    });
     // In-House / Self is a claim-processing channel, not a network TPA.
     const requireTpaEmpanelment = !!tpa && tpa.trim().toLowerCase() !== 'in-house / self';
-    recs=recs.filter(r=>{
-      const h=hospLookup[r.hospitalName.toLowerCase().trim()];
-      if(!h||h.activeStatus!=='Active')return false;
-      if(insurer && h.insurer[insurer]!==true && h.insurerRaw && h.insurerRaw[insurer]!=='No')return false;
-      if(insurer && h.insurerRaw && h.insurerRaw[insurer]==='No')return false;
-      if(requireTpaEmpanelment && h.tpa[tpa]!==true && h.tpaRaw && h.tpaRaw[tpa]!=='No')return false;
-      if(requireTpaEmpanelment && h.tpaRaw && h.tpaRaw[tpa]==='No')return false;
-      return true;
-    }).slice(0,3);
+    const eligibleNetworkRow=h=>h && h.activeStatus==='Active'
+      && (!insurer || (h.insurer[insurer]===true && h.insurerRaw?.[insurer]!=='No'))
+      && (!requireTpaEmpanelment || (h.tpa[tpa]===true && h.tpaRaw?.[tpa]!=='No'));
+    const getNetworkRows=name=>hospLookup[name.toLowerCase().trim()]||[];
+    const hasNetworkConflict=(rows,selected)=>rows.length>1 && rows.some(h=>
+      h.activeStatus!==selected.activeStatus
+      || (insurer && h.insurerRaw?.[insurer]!==selected.insurerRaw?.[insurer])
+      || (requireTpaEmpanelment && h.tpaRaw?.[tpa]!==selected.tpaRaw?.[tpa]));
+    recs=recs.filter(r=>getNetworkRows(r.hospitalName).some(eligibleNetworkRow));
+    recs=recs.slice(0,3);
     if(!recs.length){
       const desc=[city?cityLabel(city):'',insurer||'',tpa||'',category||'',procedure||''].filter(Boolean).join(' · ');
       el.innerHTML=`<div style="background:var(--amber-lt);border-left:4px solid var(--amber);border-radius:6px;padding:14px 16px;font-size:13px;color:#92400e;">
@@ -505,7 +510,9 @@ const PAGE2 = (() => {
     el.innerHTML=`<div style="font-size:12px;color:var(--text3);margin-bottom:12px;">Top 3 for: <strong style="color:var(--text);">${esc(desc)||'All combinations'}</strong></div>
     <div class="comp3-grid">${stats.map((s,i)=>{
       const isBest=i===0;const medal=i===0?'🥇':i===1?'🥈':'🥉';
-      const hNet=DATA.hospitals.find(h=>h.hospitalName.toLowerCase().trim()===s.hospitalName.toLowerCase().trim());
+      const networkRows=getNetworkRows(s.hospitalName);
+      const hNet=networkRows.find(eligibleNetworkRow);
+      const networkConflict=hNet && hasNetworkConflict(networkRows,hNet);
       return`<div class="comp3-card ${isBest?'best':''}">
         <div class="comp3-rank" style="color:${isBest?'rgba(255,255,255,.7)':'var(--text3)'};">${medal}</div>
         <div class="comp3-name" style="color:${isBest?'#fff':'var(--text)'};">${esc(s.hospitalName.split(',')[0])}</div>
@@ -515,6 +522,7 @@ const PAGE2 = (() => {
         <div class="comp3-stat"><span style="color:${isBest?'rgba(255,255,255,.7)':'var(--text2)'};">Business score</span><span style="font-weight:700;color:${isBest?'#fff':'var(--text)'};">${s.businessScore?'₹'+fmtN(s.businessScore):'—'}</span></div>
         <div class="comp3-stat"><span style="color:${isBest?'rgba(255,255,255,.7)':'var(--text2)'};">Last case</span><span style="font-weight:600;font-size:11px;color:${isBest?'#fff':'var(--text)'};">${s.lastCaseDate||'—'}</span></div>
         ${hNet?`<div style="margin-top:8px;"><span class="status-badge ${hNet.activeStatus==='Active'?'status-active':'status-inactive'}">${hNet.activeStatus}</span></div>`:''}
+        ${networkConflict?`<div style="margin-top:7px;font-size:10px;font-weight:700;color:${isBest?'#fff':'#b45309'};">⚠ Conflicting network entries — verify cashless status</div>`:''}
         <div style="margin-top:6px;">${s.topProcedures.slice(0,2).map(p=>`<div style="font-size:10px;color:${isBest?'rgba(255,255,255,.65)':'var(--text3)'};padding:2px 0;">${esc(p.procedure)} (${p.count})</div>`).join('')}</div>
       </div>`;}).join('')}</div>`;
   }
